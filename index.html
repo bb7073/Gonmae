@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<title>공매 지도</title>
+<style>
+  *{box-sizing:border-box} html,body{margin:0;height:100%;font-family:-apple-system,"Malgun Gothic",sans-serif}
+  #map{width:100%;height:100%}
+  #panel{position:absolute;z-index:5;top:8px;left:8px;right:8px;background:rgba(255,255,255,.96);
+         border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.2);padding:10px 12px;font-size:13px}
+  #panel h1{font-size:14px;margin:0 0 6px}
+  #panel .cnt{color:#c0392b;font-weight:700}
+  .ctl{display:flex;align-items:center;gap:8px;margin:6px 0}
+  .ctl label{width:74px;color:#555;flex:none}
+  .ctl input[type=range]{flex:1}
+  .ctl .val{width:56px;text-align:right;font-weight:700;flex:none}
+  .chips{display:flex;gap:6px;margin-top:4px}
+  .chip{padding:4px 10px;border:1px solid #ccc;border-radius:16px;cursor:pointer;user-select:none}
+  .chip.on{background:#2662f0;color:#fff;border-color:#2662f0}
+  #toggle{position:absolute;z-index:6;top:8px;right:12px;background:#fff;border:none;border-radius:8px;
+          padding:6px 10px;box-shadow:0 1px 5px rgba(0,0,0,.2);font-weight:700}
+  .iw{padding:10px 12px;font-size:13px;line-height:1.5;width:225px}
+  .iw img{width:100%;height:105px;object-fit:cover;border-radius:6px;margin-bottom:6px;background:#eee}
+  .iw .badge{display:inline-block;font-size:11px;padding:1px 6px;border-radius:4px;background:#eef;margin:2px 3px 4px 0}
+  .iw .row{display:flex;justify-content:space-between;gap:10px}
+  .iw .min{color:#c0392b;font-weight:700}.iw .gap{color:#1a7f37;font-weight:700}
+  .iw a{display:block;text-align:center;margin-top:7px;padding:7px;background:#03c75a;color:#fff;border-radius:6px;text-decoration:none;font-weight:700}
+</style>
+</head>
+<body>
+<button id="toggle">필터 ▾</button>
+<div id="panel">
+  <h1>공매 물건 <span class="cnt" id="cnt">0</span>건</h1>
+  <div class="ctl"><label>최저가 ≤</label><input type="range" id="price" min="1" max="20" step="1" value="20"><span class="val" id="priceV">전체</span></div>
+  <div class="ctl"><label>전용 ≥</label><input type="range" id="area" min="0" max="85" step="5" value="25"><span class="val" id="areaV">25㎡</span></div>
+  <div class="ctl"><label>용도</label>
+    <div class="chips"><span class="chip on" data-k="apt">아파트</span><span class="chip on" data-k="villa">빌라</span></div>
+  </div>
+</div>
+<div id="map"></div>
+
+<script src="data.js"></script>
+<script src="//dapi.kakao.com/v2/maps/sdk.js?appkey=9a5c9457313bde76febd1abc9f4056cc&libraries=clusterer"></script>
+<script>
+  const eok=v=>v==null||v===0?"-":(v/1e8).toFixed(2).replace(/\.?0+$/,"")+"억";
+  const S={price:20,area:25,apt:true,villa:true};
+  let map,cl,iw,ALL=[];
+  function pass(d){
+    if(S.price<20 && d.min && d.min>S.price*1e8) return false;
+    if(d.area && parseFloat(d.area)<S.area) return false;
+    if(d.isApt && !S.apt) return false;
+    if(!d.isApt && !S.villa) return false;
+    return true;
+  }
+  function render(){
+    const data=ALL.filter(pass).sort((a,b)=>{
+      if(a.gap!=null||b.gap!=null) return (b.gap??-1e18)-(a.gap??-1e18);
+      return (parseFloat(a.disc)||999)-(parseFloat(b.disc)||999);
+    });
+    document.getElementById("cnt").textContent=data.length;
+    cl.clear();
+    const ms=data.map(d=>{
+      const m=new kakao.maps.Marker({position:new kakao.maps.LatLng(d.lat,d.lng)});
+      kakao.maps.event.addListener(m,"click",()=>{
+        let h=`<div class="iw">`;
+        if(d.thumb) h+=`<img src="${d.thumb}" onerror="this.style.display='none'">`;
+        h+=`<span class="badge">${d.use||""}</span><span class="badge">${d.area||"?"}㎡</span>`
+         +(d.fail?`<span class="badge">유찰 ${d.fail}회</span>`:"")
+         +`<br><b>${d.name||""}</b><br>`
+         +`<div class="row"><span>공매 최저</span><span class="min">${eok(d.min)}</span></div>`
+         +`<div class="row"><span>감정가</span><span>${eok(d.aprs)}${d.disc?` (${d.disc}%)`:""}</span></div>`;
+        if(d.deal!=null) h+=`<div class="row"><span>최근 실거래</span><span>${eok(d.deal)}</span></div>`;
+        if(d.gap!=null) h+=`<div class="row"><span>실거래−공매</span><span class="gap">+${eok(d.gap)}</span></div>`;
+        h+=`<a href="${d.naver}" target="_blank">네이버 부동산에서 보기</a></div>`;
+        iw.setContent(h); iw.open(map,m);
+      });
+      return m;
+    });
+    cl.addMarkers(ms);
+  }
+  kakao.maps.load(function(){
+    ALL=window.GONMAE||[];
+    const c0=ALL.length?new kakao.maps.LatLng(ALL[0].lat,ALL[0].lng):new kakao.maps.LatLng(37.5637,127.0826);
+    map=new kakao.maps.Map(document.getElementById("map"),{center:c0,level:5});
+    cl=new kakao.maps.MarkerClusterer({map,averageCenter:true,minLevel:6});
+    iw=new kakao.maps.InfoWindow({removable:true});
+    const price=document.getElementById("price"),area=document.getElementById("area");
+    price.oninput=()=>{S.price=+price.value;document.getElementById("priceV").textContent=S.price>=20?"전체":S.price+"억";render();};
+    area.oninput=()=>{S.area=+area.value;document.getElementById("areaV").textContent=S.area+"㎡";render();};
+    document.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{c.classList.toggle("on");S[c.dataset.k]=c.classList.contains("on");render();});
+    document.getElementById("toggle").onclick=()=>{const p=document.getElementById("panel");p.style.display=p.style.display==="none"?"block":"none";};
+    render();
+  });
+</script>
+</body>
+</html>
