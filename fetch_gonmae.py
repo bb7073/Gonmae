@@ -41,27 +41,47 @@ def http_get(url, headers=None, timeout=20):
     return urllib.request.urlopen(req, timeout=timeout).read().decode("utf-8")
 
 # ---- 온비드 목록 (JSON) ----
-def onbid_url(op, page):
-    q = urllib.parse.urlencode({"serviceKey":DATA_KEY,"pageNo":page,"numOfRows":ROWS,"resultType":"json",
-        "prptDivCd":PRPT_DIV,"pvctTrgtYn":"N","lctnSdnm":REGION_SD,"lctnSggnm":REGION_GU}, safe="=,")
+def onbid_url(op, page, minimal=False):
+    params = {"serviceKey":DATA_KEY,"pageNo":page,"numOfRows":ROWS,"resultType":"json"}
+    if not minimal:
+        params.update({"prptDivCd":PRPT_DIV,"pvctTrgtYn":"N"})
+    params.update({"lctnSdnm":REGION_SD,"lctnSggnm":REGION_GU})
+    q = urllib.parse.urlencode(params, safe="=,")
     return f"{BASE}/{op}?{q}"
 
-def json_items(raw):
-    body = json.loads(raw).get("response",{}).get("body",{})
+def json_items(raw, debug_label=""):
+    d = json.loads(raw)
+    body = d.get("response",{}).get("body",{})
+    header = d.get("response",{}).get("header",{})
+    total = body.get("totalCount", "?")
+    print(f"    [{debug_label}] resultCode={header.get('resultCode')} resultMsg={header.get('resultMsg')} totalCount={total}")
     it = body.get("items") or {}
     it = it.get("item", []) if isinstance(it, dict) else it
     return it if isinstance(it, list) else ([it] if it else [])
 
 def fetch_list():
     for op in OP_CANDIDATES:
+        # 1차: 필터 포함 시도
         try:
-            its = json_items(http_get(onbid_url(op,1)))
+            raw = http_get(onbid_url(op,1))
+            its = json_items(raw, f"{op}/필터있음")
         except Exception as e:
-            print(f"  ({op} 실패: {e})"); continue
-        print(f"  오퍼레이션 '{op}' 사용, 1p {len(its)}건")
+            print(f"  ({op} 필터포함 실패: {e})"); its=[]
+        # 0건이면 필터(prptDivCd, pvctTrgtYn) 없이 지역만으로 재시도
+        if not its:
+            try:
+                raw2 = http_get(onbid_url(op,1,minimal=True))
+                its = json_items(raw2, f"{op}/필터없음(지역만)")
+                if its: print(f"  → 필터 없이는 데이터 있음. prptDivCd/pvctTrgtYn 값이 원인일 가능성 높음")
+            except Exception as e:
+                print(f"  ({op} 필터없음도 실패: {e})")
+        if not its:
+            print(f"  응답 원문 앞부분: {raw[:300] if 'raw' in dir() else ''}")
+            continue
+        print(f"  오퍼레이션 '{op}' 확정 사용")
         out = list(its)
         for pg in range(2, MAX_PAGES+1):
-            try: more = json_items(http_get(onbid_url(op,pg)))
+            try: more = json_items(http_get(onbid_url(op,pg)), f"{op}/p{pg}")
             except Exception: break
             if not more: break
             out += more; time.sleep(0.2)
