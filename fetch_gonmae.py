@@ -2,25 +2,23 @@
 # -*- coding: utf-8 -*-
 """
 공매(온비드) 수집 → data.js + 신규매물 카카오톡 알림
-v3: 필드명 자동대응 / 서울 전 구 순회 / 단계별 잔여건수 로그
+v4: 실제 응답 필드명 확정 반영 / 지오코딩 주소정제·폴백·실패원인 출력
 """
-import json, os, sys, time, urllib.parse, urllib.request
+import json, os, re, sys, time, urllib.parse, urllib.request, urllib.error
 import xml.etree.ElementTree as ET
 
 DATA_KEY      = os.environ.get("DATA_KEY", "")
 KAKAO_REST    = os.environ.get("KAKAO_REST_KEY", "")
 KAKAO_REFRESH = os.environ.get("KAKAO_REFRESH_TOKEN", "")
 
-# "전체" 또는 "광진구,성동구" 처럼 콤마로 지정. 기본은 서울 전체
 REGION_SD = os.environ.get("REGION_SD", "서울특별시")
-REGION_GU = os.environ.get("REGION_GU", "전체")
-DEBUG     = os.environ.get("DEBUG", "1") == "1"
+REGION_GU = os.environ.get("REGION_GU", "전체")   # "전체" 또는 "광진구,성동구"
 
-MAX_PAGES, ROWS  = 8, 100
-REALDEAL_MONTHS  = 6
-PRPT_DIV         = "0007,0005,0006,0008"
-MIN_AREA         = 25.0        # 전용 25㎡ 이상
-VILLA_CAP        = 800_000_000 # 빌라 8억 컷 (아파트는 무제한)
+MAX_PAGES, ROWS = 8, 100
+REALDEAL_MONTHS = 6
+PRPT_DIV        = "0007,0005,0006,0008"
+MIN_AREA        = 25.0          # 전용 25㎡ 이상
+VILLA_CAP       = 800_000_000   # 빌라 8억 컷 (아파트는 무제한)
 
 BASE = "https://apis.data.go.kr/B010003/OnbidRlstListSrvc2"
 OP   = "getRlstCltrList2"
@@ -36,11 +34,9 @@ SEOUL_GU = {"종로구":"11110","중구":"11140","용산구":"11170","성동구"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 def fp(n): return os.path.join(HERE, n)
-
 def num(v):
     try: return int(float(str(v).replace(",", "").strip()))
     except Exception: return 0
-
 def fnum(v):
     try: return float(str(v).replace(",", "").strip())
     except Exception: return None
@@ -49,71 +45,74 @@ def http_get(url, headers=None, timeout=20):
     req = urllib.request.Request(url, headers=headers or {})
     return urllib.request.urlopen(req, timeout=timeout).read().decode("utf-8")
 
-# ── 핵심: 응답 키 이름이 camelCase든 UPPER_SNAKE든 상관없이 찾아내기 ──────────
-def norm(item):
-    """{'LCTN_SGGNM': '광진구'} 와 {'lctnSggnm': '광진구'} 를 같은 키로 통일"""
-    return {str(k).lower().replace("_", ""): v for k, v in item.items()}
-
-def pick(nd, *cands, default=""):
-    for c in cands:
-        k = c.lower().replace("_", "")
-        v = nd.get(k)
-        if v not in (None, "", "null"): return str(v).strip()
-    return default
-
-def pick_contains(nd, *keywords):
-    """키 이름에 특정 단어가 들어간 필드를 통째로 긁어 이어붙임 (주소/용도 탐색용)"""
-    vals = []
-    for k, v in nd.items():
-        if v in (None, "", "null"): continue
-        if any(kw in k for kw in keywords): vals.append(str(v))
-    return " ".join(vals)
-
 # ── 목록 조회 ─────────────────────────────────────────────────────────────
-def onbid_url(page, gu=None, minimal=False):
-    p = {"serviceKey": DATA_KEY, "pageNo": page, "numOfRows": ROWS, "resultType": "json"}
-    if not minimal:
-        p.update({"prptDivCd": PRPT_DIV, "pvctTrgtYn": "N"})
-    p["lctnSdnm"] = REGION_SD
-    if gu: p["lctnSggnm"] = gu
+def onbid_url(page, gu):
+    p = {"serviceKey": DATA_KEY, "pageNo": page, "numOfRows": ROWS, "resultType": "json",
+         "prptDivCd": PRPT_DIV, "pvctTrgtYn": "N",
+         "lctnSdnm": REGION_SD, "lctnSggnm": gu}
     return f"{BASE}/{OP}?{urllib.parse.urlencode(p, safe='=,')}"
 
-def json_items(raw, label=""):
-    d = json.loads(raw)
-    root = d.get("response", d)
+def json_items(raw, label):
+    d = json.loads(raw); root = d.get("response", d)
     body, header = root.get("body", {}), root.get("header", {})
-    print(f"    [{label}] code={header.get('resultCode')} total={body.get('totalCount','?')}")
     it = body.get("items") or {}
     it = it.get("item", []) if isinstance(it, dict) else it
     if isinstance(it, dict): it = [it]
-    return it if isinstance(it, list) else []
+    if not isinstance(it, list): it = []
+    print(f"    [{label}] code={header.get('resultCode')} total={body.get('totalCount','?')} items={len(it)}")
+    return it
 
-def fetch_list(gu=None):
+def fetch_list(gu):
     out = []
     for pg in range(1, MAX_PAGES + 1):
         try:
-            its = json_items(http_get(onbid_url(pg, gu)), f"{gu or REGION_SD}/p{pg}")
+            its = json_items(http_get(onbid_url(pg, gu)), f"{gu}/p{pg}")
         except Exception as e:
-            print(f"  (목록 실패 p{pg}: {e})"); break
+            print(f"  (목록 실패 {gu} p{pg}: {e})"); break
         if not its: break
         out += its
         if len(its) < ROWS: break
         time.sleep(0.2)
     return out
 
-# ── 지오코딩 / 실거래 ─────────────────────────────────────────────────────
-def geocode(addr, cache):
-    if not addr: return None
-    if addr in cache: return cache[addr]
-    c = None
-    try:
-        docs = json.loads(http_get(
-            "https://dapi.kakao.com/v2/local/search/address.json?query=" + urllib.parse.quote(addr),
-            headers={"Authorization": f"KakaoAK {KAKAO_REST}"}))["documents"]
-        if docs: c = [float(docs[0]["x"]), float(docs[0]["y"])]
-    except Exception: pass
-    cache[addr] = c; time.sleep(0.1); return c
+# ── 지오코딩 (카카오) ─────────────────────────────────────────────────────
+_geo_err = {"n": 0}
 
+def clean_addr(full):
+    """'서울특별시 광진구 화양동 530 씨즈건대힐스 제2층 제206호' → 후보 리스트"""
+    s = re.sub(r"\s*외\s*\d+\s*필지", "", full or "").strip()
+    lv1 = re.sub(r"\s*제?\s*[지B]?\d+\s*층.*$", "", s).strip()           # 층 이하 절단
+    lv1 = re.sub(r"\s*제?\s*[\dA-Za-z\-]+\s*호\s*$", "", lv1).strip()    # 호 제거
+    m = re.search(r"(\S*시\s+\S+구\s+\S+동\s+(?:산\s*)?[\d\-]+)", s)      # 순수 지번
+    lv2 = m.group(1) if m else ""
+    return [c for c in (lv1, lv2, s) if c]
+
+def geocode(cands, cache):
+    for addr in cands:
+        if not addr: continue
+        if addr in cache:
+            if cache[addr]: return cache[addr]
+            continue
+        c = None
+        try:
+            docs = json.loads(http_get(
+                "https://dapi.kakao.com/v2/local/search/address.json?query=" + urllib.parse.quote(addr),
+                headers={"Authorization": f"KakaoAK {KAKAO_REST}"}))["documents"]
+            if docs: c = [float(docs[0]["x"]), float(docs[0]["y"])]
+        except urllib.error.HTTPError as e:
+            if _geo_err["n"] < 3:
+                _geo_err["n"] += 1
+                print(f"  ★지오코딩 HTTP {e.code} — 카카오 REST 키 문제로 보입니다 (addr={addr})")
+        except Exception as e:
+            if _geo_err["n"] < 3:
+                _geo_err["n"] += 1
+                print(f"  ★지오코딩 오류: {e} (addr={addr})")
+        cache[addr] = c
+        time.sleep(0.08)
+        if c: return c
+    return None
+
+# ── 실거래 ────────────────────────────────────────────────────────────────
 def ym_list(n):
     import datetime as dt
     b = dt.date.today().replace(day=1); out = []
@@ -126,16 +125,16 @@ def ym_list(n):
 def xml_items(raw):
     return [{c.tag: (c.text or "").strip() for c in it} for it in ET.fromstring(raw).findall(".//item")]
 
-_DEAL_CACHE = {}
+_DEAL = {}
 def load_deals(lawd):
     if not lawd: return {"apt": [], "rh": [], "silv": []}
-    if lawd in _DEAL_CACHE: return _DEAL_CACHE[lawd]
+    if lawd in _DEAL: return _DEAL[lawd]
     idx = {"apt": [], "rh": [], "silv": []}
     NM = {"apt": ["aptNm", "아파트"], "rh": ["mhouseNm", "연립다세대"], "silv": ["aptNm", "단지", "아파트"]}
     for kind in idx:
         for ym in ym_list(REALDEAL_MONTHS):
-            q = urllib.parse.urlencode({"serviceKey": DATA_KEY, "LAWD_CD": lawd,
-                                        "DEAL_YMD": ym, "numOfRows": 1000, "pageNo": 1}, safe="=")
+            q = urllib.parse.urlencode({"serviceKey": DATA_KEY, "LAWD_CD": lawd, "DEAL_YMD": ym,
+                                        "numOfRows": 1000, "pageNo": 1}, safe="=")
             try: its = xml_items(http_get(f"{RT[kind]}?{q}"))
             except Exception: its = []
             for it in its:
@@ -143,12 +142,12 @@ def load_deals(lawd):
                 ar = it.get("excluUseAr") or it.get("전용면적") or ""
                 am = (it.get("dealAmount") or it.get("거래금액") or "").replace(",", "").strip()
                 if nm and am: idx[kind].append({"name": nm, "area": ar, "amount": am, "ym": ym})
-            time.sleep(0.1)
-    _DEAL_CACHE[lawd] = idx
+            time.sleep(0.08)
+    _DEAL[lawd] = idx
     return idx
 
-def match(name, area, idx, kind):
-    a = fnum(area); tgt = (name or "").replace(" ", ""); best = None
+def match(bldg, area, idx, kind):
+    a = fnum(area); tgt = (bldg or "").replace(" ", ""); best = None
     for d in idx.get(kind, []):
         dn = d["name"].replace(" ", "")
         if len(dn) >= 2 and dn in tgt:
@@ -157,70 +156,64 @@ def match(name, area, idx, kind):
             if not best or d["ym"] > best["ym"]: best = d
     return best
 
-# ── 가공 ─────────────────────────────────────────────────────────────────
-RESI = ("아파트", "연립", "다세대", "빌라", "단독", "다가구", "주거용")
-def build(items, gu_hint=None):
+# ── 가공 (필드명 확정) ────────────────────────────────────────────────────
+RESI = ("아파트", "연립", "다세대", "빌라", "단독", "다가구", "도시형생활주택", "주거용")
+def build(items, gu):
     gc = json.load(open(fp("geocode_cache.json"), encoding="utf-8")) if os.path.exists(fp("geocode_cache.json")) else {}
     stat = {"입력": len(items), "주거용": 0, "면적": 0, "가격": 0, "지오코딩": 0}
+    deals = load_deals(SEOUL_GU.get(gu))
     out = []
 
-    if DEBUG and items:
-        print("  [필드덤프] 첫 아이템 키 =", sorted(items[0].keys()))
-        print("  [필드덤프] 첫 아이템 =", json.dumps(items[0], ensure_ascii=False)[:700])
-
-    for raw_it in items:
-        nd = norm(raw_it)
-
-        # 주소·용도는 키 이름이 뭐든 '주소/용도스러운' 필드를 전부 긁어서 판단
-        addr_blob = pick_contains(nd, "adrs", "addr", "lctn", "지번", "주소") or ""
-        use_blob  = pick_contains(nd, "ctgr", "usg", "용도", "goods") or ""
-        name = pick(nd, "cltrNm", "onbidCltrNm", "goodsNm", "물건명")
-
-        gu = next((g for g in SEOUL_GU if g in addr_blob), None) or gu_hint
-        if not gu: continue
-
-        if "오피스텔" in use_blob or "오피스텔" in name: continue
-        if not any(k in use_blob for k in RESI): continue
+    for it in items:
+        use  = f"{it.get('cltrUsgMclsCtgrNm','')} {it.get('cltrUsgSclsCtgrNm','')}"
+        full = (it.get("onbidCltrNm") or "").strip()      # ← 전체 지번주소가 여기 들어있음
+        if "오피스텔" in use: continue
+        if not any(k in use for k in RESI): continue
         stat["주거용"] += 1
 
-        area = fnum(pick(nd, "bldSqms", "bldArea", "excluUseAr", "면적"))
+        area = fnum(it.get("bldSqms"))
         if area is not None and area < MIN_AREA: continue
         stat["면적"] += 1
 
-        minp  = num(pick(nd, "minBidPrc", "lowstBidPrcIndctCont", "최저입찰가"))
-        aprs  = num(pick(nd, "apslAsesAvgAmt", "apslEvlAmt", "감정가"))
-        is_apt = "아파트" in use_blob or "아파트" in name
+        minp   = num(it.get("lowstBidPrcIndctCont"))
+        aprs   = num(it.get("apslEvlAmt"))
+        is_apt = "아파트" in use
         if (not is_apt) and minp and minp > VILLA_CAP: continue
         stat["가격"] += 1
 
-        coord = geocode(addr_blob.split("(")[0][:60], gc) or geocode(f"{REGION_SD} {gu} {name}", gc)
+        cands = clean_addr(full)
+        cands.append(f"{it.get('lctnSdnm','')} {it.get('lctnSggnm','')} {it.get('lctnEmdNm','')}".strip())
+        coord = geocode(cands, gc)
         if not coord: continue
         stat["지오코딩"] += 1
 
-        deals = load_deals(SEOUL_GU.get(gu))
-        deal  = match(name, area, deals, "apt" if is_apt else "rh")
-        silv  = match(name, area, deals, "silv") if is_apt else None
-        gap   = (num(deal["amount"]) * 10000 - minp) if (deal and minp) else None
+        bldg = re.sub(r"^\S*시\s+\S+구\s+\S+동\s+[\d\-]+\s*", "", cands[0]).strip()
+        deal = match(bldg, area, deals, "apt" if is_apt else "rh")
+        silv = match(bldg, area, deals, "silv") if is_apt else None
+        gap  = (num(deal["amount"]) * 10000 - minp) if (deal and minp) else None
 
         out.append({
-            "name": name, "addr": addr_blob[:60], "gu": gu,
-            "use": use_blob.split("/")[-1].strip()[:20],
+            "name": bldg or full[:30], "addr": full, "gu": gu,
+            "use": it.get("cltrUsgSclsCtgrNm", "") or it.get("cltrUsgMclsCtgrNm", ""),
             "isApt": is_apt, "area": area or "", "min": minp, "aprs": aprs,
-            "disc": pick(nd, "apslPrcCtrsLowstBidRto", "minBidPrcRate"),
-            "fail": pick(nd, "usbdNft", "uscbdCnt"),
-            "status": pick(nd, "pbctStatNm", "pbctCltrStatNm"),
-            "id": pick(nd, "cltrMngNo", "cltrMnmtNo", "cltrNo"),
-            "thumb": pick(nd, "thnlImgUrlAdr", "cltrImgFilePath").replace("&amp;", "&"),
+            "disc": it.get("apslPrcCtrsLowstBidRto", ""),
+            "fail": it.get("usbdNft", ""),
+            "status": it.get("pbctStatNm", ""),
+            "id": it.get("cltrMngNo", ""),
+            "end": it.get("cltrBidEndDt", ""),
+            "kind": it.get("prptDivNm", ""),
+            "thumb": (it.get("thnlImgUrlAdr") or "").replace("&amp;", "&"),
             "deal": num(deal["amount"]) * 10000 if deal else None,
             "silv": num(silv["amount"]) * 10000 if silv else None,
             "gap": gap,
-            "naver": NAVER_TMPL.format(q=urllib.parse.quote(name or f"{gu}")),
+            "naver": NAVER_TMPL.format(q=urllib.parse.quote(bldg or f"{gu} {it.get('lctnEmdNm','')}")),
             "lng": coord[0], "lat": coord[1]})
 
     json.dump(gc, open(fp("geocode_cache.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print("  단계별 잔여: " + " → ".join(f"{k} {v}" for k, v in stat.items()))
     return out
 
+# ── 알림 ─────────────────────────────────────────────────────────────────
 def read_prev():
     try:
         s = open(fp("data.js"), encoding="utf-8").read()
@@ -235,7 +228,7 @@ def kakao_token():
 
 def kakao_send(text, link):
     if not (KAKAO_REFRESH and KAKAO_REST):
-        print("  (카카오 토큰 없음 → 알림 생략)"); return
+        print("  (카카오 리프레시 토큰 없음 → 알림 생략)"); return
     try:
         tok = kakao_token()
         tmpl = json.dumps({"object_type": "text", "text": text[:900],
@@ -250,19 +243,20 @@ def kakao_send(text, link):
 
 if __name__ == "__main__":
     if not DATA_KEY:
-        print("ERROR: DATA_KEY 환경변수 없음 (GitHub Secrets 확인)"); sys.exit(1)
+        print("ERROR: DATA_KEY 없음 (GitHub Secrets 확인)"); sys.exit(1)
+    if not KAKAO_REST:
+        print("ERROR: KAKAO_REST_KEY 없음 → 지오코딩이 전부 실패합니다. Secrets에 등록하세요."); sys.exit(1)
 
     gus = list(SEOUL_GU) if REGION_GU in ("전체", "", "ALL") else [g.strip() for g in REGION_GU.split(",")]
-    print(f"수집 시작 — 대상 {len(gus)}개 구: {', '.join(gus)}")
+    print(f"수집 시작 — 대상 {len(gus)}개 구")
 
     prev_ids = {x.get("id") for x in read_prev()}
     cur = []
     for gu in gus:
         items = fetch_list(gu)
         print(f"  · {gu}: 목록 {len(items)}건")
-        cur += build(items, gu_hint=gu)
+        cur += build(items, gu)
 
-    # id 중복 제거
     seen, uniq = set(), []
     for x in cur:
         if x["id"] and x["id"] in seen: continue
