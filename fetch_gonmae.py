@@ -29,9 +29,8 @@ OP   = "getRlstCltrList2"
 DTL_BASE = "https://apis.data.go.kr/B010003/OnbidRlstDtlSrvc2"   # 부동산 물건상세 조회 (승인 2026-07-09)
 # 포털에 오퍼레이션ID가 한글명으로만 표시돼 후보를 순차 시도한다.
 # 정확한 ID를 알면 Actions env DTL_OP=... 로 넣으면 추측 없이 그것만 쓴다.
-DTL_OPS  = [os.environ.get("DTL_OP", "").strip()] if os.environ.get("DTL_OP", "").strip() else [
-    "getRlstCltrDtl2", "getRlstCltrDtlInfo2", "getRlstCltrDtlList2", "getRlstCltrDetail2",
-    "getRlstCltrDtl", "getRlstDtlList2", "getRlstDtl2", "getRlstCltrDtlSrvc2"]
+# 오퍼레이션 ID 확정(포털 미리보기로 확인, 2026-07-14): getRlstDtlInf2
+DTL_OPS  = [os.environ.get("DTL_OP", "").strip()] if os.environ.get("DTL_OP", "").strip() else ["getRlstDtlInf2"]
 KAKAO_ADDR = "https://dapi.kakao.com/v2/local/search/address.json?query="
 KAKAO_KW   = "https://dapi.kakao.com/v2/local/search/keyword.json?query="
 RT = {"apt":"https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev",
@@ -87,6 +86,8 @@ def kakao_selftest():
     except Exception as e:
         print(f"[키체크] ❌ {e}"); return False
 
+_LIST_DUMPED = {"x": False}
+
 # ── 온비드 목록 ───────────────────────────────────────────────────────────
 def fetch_list(gu):
     out = []
@@ -102,6 +103,9 @@ def fetch_list(gu):
         it = it.get("item", []) if isinstance(it, dict) else it
         if isinstance(it, dict): it = [it]
         if not it: break
+        if not _LIST_DUMPED["x"]:
+            _LIST_DUMPED["x"] = True
+            print("  [목록필드] " + json.dumps(it[0], ensure_ascii=False)[:2000])
         out += it
         if len(it) < ROWS: break
         time.sleep(0.15)
@@ -171,6 +175,8 @@ def fetch_detail(mng, cdtn):
             _DTL_ERR["n"] += 1
             print(f"  [상세] 키 부족 → 호출 생략 (cltrMngNo={mng!r}, pbctCdtnNo={cdtn!r})")
         return {}
+    if _DTL_ERR["n"] >= 10 and not _DTL_OP["op"]:
+        return {}                      # 후보 전멸 → 상세 API 호출 중단
     ops = [_DTL_OP["op"]] if _DTL_OP["op"] else DTL_OPS
     for op in ops:
         q = urllib.parse.urlencode({"serviceKey": DATA_KEY, "cltrMngNo": mng, "pbctCdtnNo": cdtn,
@@ -183,6 +189,12 @@ def fetch_detail(mng, cdtn):
                 _DTL_ERR["n"] += 1
                 body = e.read().decode("utf-8", "ignore")[:180] if hasattr(e, "read") else str(e)[:180]
                 print(f"  [상세] {op} 실패: {body}")
+            continue
+        if isinstance(d.get("result"), dict):          # {"result":{"resultCode":"03",...}}
+            if _DTL_ERR["n"] < 3:
+                _DTL_ERR["n"] += 1
+                print(f"  [상세] {op} 응답: {json.dumps(d['result'], ensure_ascii=False)[:120]} "
+                      f"(cltrMngNo={mng}, pbctCdtnNo={cdtn})")
             continue
         body = d.get("response", d).get("body", {})
         it = body.get("items") or {}
@@ -367,7 +379,7 @@ def _process_one(pack, gu, lawd, gc):
         "hh": apt.get("hh"), "dong": apt.get("dong"), "used": apt.get("used"),
         "heat": apt.get("heat"), "hall": apt.get("hall"), "kaptName": apt.get("kaptName"),
         "lat": coord[1], "lng": coord[0]}
-    row["on"] = onbid_ids(fetch_detail(row["id"], row["cd"]), row["cd"])
+    row["on"] = onbid_ids(it, row["cd"]) or onbid_ids(fetch_detail(row["id"], row["cd"]), row["cd"])
     return "ok", row
 
 _STAGE = {"resi": 1, "area": 2, "ok": 3}
