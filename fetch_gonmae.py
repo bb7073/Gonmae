@@ -37,9 +37,10 @@ RT = {"apt":"https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataS
       "rh": "https://apis.data.go.kr/1613000/RTMSDataSvcRHTrade/getRTMSDataSvcRHTrade",
       "silv":"https://apis.data.go.kr/1613000/RTMSDataSvcSilvTrade/getRTMSDataSvcSilvTrade"}
 APT_LIST_BASE  = "https://apis.data.go.kr/1613000/AptListService3"
-APT_LIST_OPS   = ["getLegaldongAptList3", "getLegaldongAptList"]
+APT_LIST_OPS   = ["getLegaldongAptList3"]        # 확인됨(2026-07-14), 응답=JSON
 APT_BASIS_BASE = "https://apis.data.go.kr/1613000/AptBasisInfoServiceV4"
-APT_BASIS_OPS  = ["getAphusBassInfoV4", "getAphusBassInfoV3", "getAphusBassInfo"]
+APT_BASIS_OPS  = ["getAphusBassInfoV4"]           # 확인됨, 응답=JSON (kaptdaCnt=세대수)
+APT_DTL_OP     = "getAphusDtlInfoV4"             # 주차대수·지하철 등 부가정보
 
 SEOUL_GU = {"종로구":"11110","중구":"11140","용산구":"11170","성동구":"11200","광진구":"11215",
 "동대문구":"11230","중랑구":"11260","성북구":"11290","강북구":"11305","도봉구":"11320",
@@ -60,6 +61,19 @@ def http_get(url, headers=None, timeout=25):
     return urllib.request.urlopen(req, timeout=timeout).read().decode("utf-8")
 def xml_items(raw):
     return [{c.tag: (c.text or "").strip() for c in it} for it in ET.fromstring(raw).findall(".//item")]
+
+def api_items(raw):
+    """공공데이터 응답에서 item 리스트를 꺼낸다. JSON/XML 둘 다 처리.
+       AptListService3·AptBasisInfoServiceV4는 JSON을 준다(items=배열, item=객체)."""
+    raw = (raw or "").strip()
+    if raw.startswith("{"):
+        d = json.loads(raw)
+        body = d.get("response", d).get("body", {}) or {}
+        it = body.get("items", body.get("item", []))
+        if isinstance(it, dict): it = it.get("item", it)
+        if isinstance(it, dict): it = [it]
+        return it or []
+    return xml_items(raw)
 def g(d, *keys):
     for k in keys:
         if d.get(k): return d[k]
@@ -72,6 +86,15 @@ def gi(d, *keys):
         if v: return v
     return ""
 def nrm(s): return re.sub(r"[\s\(\)0-9\-]|아파트|주상복합", "", s or "")
+
+def share_of(name):
+    """물건명에 박혀있는 지분 표기 추출: '지분 1/2', '(1/2 지분)', '지분매각' 등"""
+    t = name or ""
+    m = re.search(r"(\d+\s*/\s*\d+)", t)
+    if "지분" in t or m:
+        frac = m.group(1).replace(" ", "") if m else ""
+        return f"지분 {frac}".strip() if ("지분" in t or frac) else ""
+    return ""
 def now_kst(): return time.strftime("%Y%m%d%H%M", time.gmtime(time.time() + 9 * 3600))
 
 # ── 카카오 셀프테스트 ─────────────────────────────────────────────────────
@@ -117,7 +140,7 @@ def fetch_list(gu):
 # → 지금 입찰 가능한(마감이 아직 안 지난) 회차 중 가장 임박한 것을 채택하고,
 #   나머지 회차는 ladder(가격 사다리)로 보존해 상세화면에 보여준다.
 def _end(it): return re.sub(r"\D", "", gi(it, "cltrBidEndDt", "pbctBidEndDt", "bidEndDt", "bidClsgDt") or "")[:12]
-def _bgn(it): return re.sub(r"\D", "", gi(it, "cltrBidBgnDt", "pbctBidBgnDt", "bidBgnDt", "bidStrtDt") or "")[:12]
+def _bgn(it): return re.sub(r"\D", "", gi(it, "cltrBidBgngDt", "cltrBidBgnDt", "pbctBidBgngDt", "bidBgngDt") or "")[:12]
 
 def group_rounds(items):
     by = {}
@@ -209,19 +232,21 @@ def fetch_detail(mng, cdtn):
         return it[0]
     return {}
 
-def onbid_ids(dtl, cdtn):
-    """온비드 물건상세 URL 파라미터. 4개 ID가 다 모여야 링크 생성."""
-    o = {"plnmNo": gi(dtl, "plnmNo", "onbidPbancNo", "pbancNo"),
-         "pbctNo": gi(dtl, "pbctNo"),
-         "cltrNo": gi(dtl, "cltrNo", "onbidCltrno"),
-         "cltrHstrNo": gi(dtl, "cltrHstrNo"),
-         "pbctCdtnNo": gi(dtl, "pbctCdtnNo") or cdtn,
-         "scrnGrpCd": gi(dtl, "scrnGrpCd", "cltrScrnGrpCd") or "0001"}
-    return o if all(o[k] for k in ("plnmNo", "pbctNo", "cltrNo", "cltrHstrNo")) else {}
+def onbid_ids(it, cdtn):
+    """차세대 온비드 물건상세 URL 파라미터 — 전부 목록 API 안에 있다.
+       .../CltrDtlController/mvmnCltrDtl.do?cltrScrnGrpCd=0001&cltrPrptDivCd=0007
+         &onbidCltrno=..&onbidPbancNo=..&pbctNo=..&pbctCdtnNo=.."""
+    o = {"c":  str(gi(it, "onbidCltrno", "cltrNo") or ""),
+         "p":  str(gi(it, "onbidPbancNo", "plnmNo", "pbancNo") or ""),
+         "b":  str(gi(it, "pbctNo") or ""),
+         "cd": str(gi(it, "pbctCdtnNo") or cdtn or ""),
+         "dv": str(gi(it, "prptDivCd") or "0007")}
+    return o if (o["c"] and o["p"] and o["b"] and o["cd"]) else {}
 
 # ── 아파트 단지정보 ───────────────────────────────────────────────────────
 _APT_LIST_OP, _APT_BASIS_OP = {"op": None}, {"op": None}
 _BJD_CACHE, _KAPT_CACHE = {}, {}
+_APT_ERR, _APT_BERR = {"x": False}, {"x": False}
 
 def apt_list_by_bjd(bjd):
     if bjd in _BJD_CACHE: return _BJD_CACHE[bjd]
@@ -230,8 +255,18 @@ def apt_list_by_bjd(bjd):
     for op in ops:
         q = urllib.parse.urlencode({"serviceKey": DATA_KEY, "bjdCode": bjd,
                                     "numOfRows": 200, "pageNo": 1}, safe="=")
-        try: its = xml_items(http_get(f"{APT_LIST_BASE}/{op}?{q}"))
-        except Exception: continue
+        try:
+            raw = http_get(f"{APT_LIST_BASE}/{op}?{q}")
+            its = api_items(raw)
+            if not its and not _APT_ERR["x"]:
+                _APT_ERR["x"] = True
+                print(f"  [단지목록] {op} 응답 비어있음: {raw[:220]}")
+        except Exception as e:
+            if not _APT_ERR["x"]:
+                _APT_ERR["x"] = True
+                body = e.read().decode("utf-8", "ignore")[:220] if hasattr(e, "read") else str(e)[:220]
+                print(f"  [단지목록] {op} 실패: {body}")
+            continue
         if its or _APT_LIST_OP["op"]:
             if not _APT_LIST_OP["op"]:
                 _APT_LIST_OP["op"] = op; print(f"  [단지목록] 오퍼레이션 '{op}' 사용")
@@ -247,15 +282,35 @@ def apt_basis(kapt):
     info = {}
     for op in ops:
         q = urllib.parse.urlencode({"serviceKey": DATA_KEY, "kaptCode": kapt}, safe="=")
-        try: its = xml_items(http_get(f"{APT_BASIS_BASE}/{op}?{q}"))
-        except Exception: continue
+        try:
+            raw = http_get(f"{APT_BASIS_BASE}/{op}?{q}")
+            its = api_items(raw)
+            if not its and not _APT_BERR["x"]:
+                _APT_BERR["x"] = True
+                print(f"  [단지정보] {op} 응답 비어있음: {raw[:220]}")
+        except Exception as e:
+            if not _APT_BERR["x"]:
+                _APT_BERR["x"] = True
+                body = e.read().decode("utf-8", "ignore")[:220] if hasattr(e, "read") else str(e)[:220]
+                print(f"  [단지정보] {op} 실패: {body}")
+            continue
         if its:
             if not _APT_BASIS_OP["op"]:
                 _APT_BASIS_OP["op"] = op; print(f"  [단지정보] 오퍼레이션 '{op}' 사용")
             it = its[0]
-            info = {"hh": num(g(it, "kaptdaCnt")), "dong": num(g(it, "kaptDongCnt")),
-                    "used": g(it, "kaptUsedate"), "heat": g(it, "codeHeatNm"),
-                    "hall": g(it, "codeHallNm"), "kaptName": g(it, "kaptName")}
+            info = {"hh": num(gi(it, "kaptdaCnt")), "dong": num(gi(it, "kaptDongCnt")),
+                    "used": gi(it, "kaptUsedate"), "heat": gi(it, "codeHeatNm"),
+                    "hall": gi(it, "codeHallNm"), "kaptName": gi(it, "kaptName"),
+                    "top": num(gi(it, "kaptTopFloor")) or None}
+            try:                                   # 부가정보(주차대수·지하철) — 실패해도 무시
+                q2 = urllib.parse.urlencode({"serviceKey": DATA_KEY, "kaptCode": kapt}, safe="=")
+                d2 = api_items(http_get(f"{APT_BASIS_BASE}/{APT_DTL_OP}?{q2}"))
+                if d2:
+                    info["park"] = num(gi(d2[0], "kaptdPcnt")) + num(gi(d2[0], "kaptdPcntu")) or None
+                    info["subway"] = gi(d2[0], "subwayLine")
+                    info["subwayMin"] = gi(d2[0], "kaptdWtimesub")
+            except Exception:
+                pass
             break
     _KAPT_CACHE[kapt] = info
     time.sleep(0.05)
@@ -371,6 +426,7 @@ def _process_one(pack, gu, lawd, gc):
         "fail": num(gi(it, "usbdNft")), "round": num(gi(it, "pbctNsq", "pbctSqnc")),
         "status": gi(it, "pbctStatNm"), "bgn": _bgn(it), "end": _end(it),
         "ladder": ladder, "rounds": len(ladder),
+        "share": share_of(full),
         "org": gi(it, "orgNm"),
         "thumb": (gi(it, "thnlImgUrlAdr") or "").replace("&amp;", "&"),
         "deal": last, "dealAvg": avg,
@@ -378,8 +434,9 @@ def _process_one(pack, gu, lawd, gc):
         "gap": (last - minp) if (last and minp) else None,
         "hh": apt.get("hh"), "dong": apt.get("dong"), "used": apt.get("used"),
         "heat": apt.get("heat"), "hall": apt.get("hall"), "kaptName": apt.get("kaptName"),
+        "park": apt.get("park"), "subway": apt.get("subway"), "subwayMin": apt.get("subwayMin"),
         "lat": coord[1], "lng": coord[0]}
-    row["on"] = onbid_ids(it, row["cd"]) or onbid_ids(fetch_detail(row["id"], row["cd"]), row["cd"])
+    row["on"] = onbid_ids(it, row["cd"])
     return "ok", row
 
 _STAGE = {"resi": 1, "area": 2, "ok": 3}
