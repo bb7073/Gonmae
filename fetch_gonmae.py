@@ -2,16 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 공매(온비드) 수집 → data.js + 신규매물 카카오톡 알림
-v7: 서울 25개 구 / 회차 중복정리 / 법정동·지번 실거래 24개월 / 아파트 단지정보(세대수 등)
+v9: ★현재 회차 선택(회차 사다리 보존) / 아파트 재분류 / 온비드 딥링크 ID / 가격컷 제거
 """
 import json, os, re, sys, time, urllib.parse, urllib.request, urllib.error
 import xml.etree.ElementTree as ET
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 
-# GitHub Actions처럼 터미널이 아닌 곳으로 출력할 때 파이썬은 기본적으로
-# 출력을 모아뒀다가 나중에 한꺼번에 내보낸다(블록 버퍼링). 그래서 스크립트는
-# 실제로 잘 돌고 있어도 로그 화면엔 한참 동안 아무것도 안 뜨는 것처럼 보인다.
-# 매 줄마다 즉시 내보내도록 강제한다.
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 
@@ -25,18 +21,22 @@ REGION_SD       = "서울특별시"
 MAX_PAGES, ROWS = 10, 100
 REALDEAL_MONTHS = 24
 PRPT_DIV        = "0007,0005,0006,0008"
-MIN_AREA        = 25.0
-VILLA_CAP       = 800_000_000
+MIN_AREA        = 25.0          # 전용 25㎡ 미만은 수집 안 함 (그 위 크기·가격은 앱에서 필터)
 PAGE_URL        = "https://bb7073.github.io/Gonmae/"
 
 BASE = "https://apis.data.go.kr/B010003/OnbidRlstListSrvc2"
 OP   = "getRlstCltrList2"
+DTL_BASE = "https://apis.data.go.kr/B010003/OnbidRlstDtlSrvc2"   # 부동산 물건상세 조회 (승인 2026-07-09)
+# 포털에 오퍼레이션ID가 한글명으로만 표시돼 후보를 순차 시도한다.
+# 정확한 ID를 알면 Actions env DTL_OP=... 로 넣으면 추측 없이 그것만 쓴다.
+DTL_OPS  = [os.environ.get("DTL_OP", "").strip()] if os.environ.get("DTL_OP", "").strip() else [
+    "getRlstCltrDtl2", "getRlstCltrDtlInfo2", "getRlstCltrDtlList2", "getRlstCltrDetail2",
+    "getRlstCltrDtl", "getRlstDtlList2", "getRlstDtl2", "getRlstCltrDtlSrvc2"]
 KAKAO_ADDR = "https://dapi.kakao.com/v2/local/search/address.json?query="
 KAKAO_KW   = "https://dapi.kakao.com/v2/local/search/keyword.json?query="
 RT = {"apt":"https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev",
       "rh": "https://apis.data.go.kr/1613000/RTMSDataSvcRHTrade/getRTMSDataSvcRHTrade",
       "silv":"https://apis.data.go.kr/1613000/RTMSDataSvcSilvTrade/getRTMSDataSvcSilvTrade"}
-# 공동주택 단지목록 / 기본정보 (오퍼레이션명은 후보를 순차 시도해 자동 확정)
 APT_LIST_BASE  = "https://apis.data.go.kr/1613000/AptListService3"
 APT_LIST_OPS   = ["getLegaldongAptList3", "getLegaldongAptList"]
 APT_BASIS_BASE = "https://apis.data.go.kr/1613000/AptBasisInfoServiceV4"
@@ -65,7 +65,15 @@ def g(d, *keys):
     for k in keys:
         if d.get(k): return d[k]
     return ""
+def gi(d, *keys):
+    """대소문자·언더스코어 무시 키 조회 (API가 필드명을 바꿔도 견디게)"""
+    low = {re.sub(r"[^a-z0-9]", "", str(k).lower()): v for k, v in d.items()}
+    for k in keys:
+        v = low.get(re.sub(r"[^a-z0-9]", "", k.lower()))
+        if v: return v
+    return ""
 def nrm(s): return re.sub(r"[\s\(\)0-9\-]|아파트|주상복합", "", s or "")
+def now_kst(): return time.strftime("%Y%m%d%H%M", time.gmtime(time.time() + 9 * 3600))
 
 # ── 카카오 셀프테스트 ─────────────────────────────────────────────────────
 def kakao_selftest():
@@ -99,6 +107,30 @@ def fetch_list(gu):
         time.sleep(0.15)
     return out
 
+# ── ★회차 처리 ───────────────────────────────────────────────────────────
+# 목록 API는 한 물건을 '회차별로 여러 행'으로 준다(1회차 100% → 마지막 회차 10%).
+# 예전 코드는 그 중 '가장 싼 행'을 골라서 마지막 회차 가격/마감일이 찍혔다.
+# → 지금 입찰 가능한(마감이 아직 안 지난) 회차 중 가장 임박한 것을 채택하고,
+#   나머지 회차는 ladder(가격 사다리)로 보존해 상세화면에 보여준다.
+def _end(it): return re.sub(r"\D", "", gi(it, "cltrBidEndDt", "pbctBidEndDt", "bidEndDt", "bidClsgDt") or "")[:12]
+def _bgn(it): return re.sub(r"\D", "", gi(it, "cltrBidBgnDt", "pbctBidBgnDt", "bidBgnDt", "bidStrtDt") or "")[:12]
+
+def group_rounds(items):
+    by = {}
+    for it in items:
+        k = gi(it, "cltrMngNo") or f"{gi(it,'onbidCltrNm')}|{gi(it,'bldSqms')}"
+        by.setdefault(k, []).append(it)
+    out, NOW = [], now_kst()
+    for rows in by.values():
+        rows.sort(key=lambda r: _end(r) or "999999999999")
+        live = [r for r in rows if _end(r) and _end(r) >= NOW]
+        cur = live[0] if live else rows[-1]
+        ladder = [{"rd": num(gi(r, "pbctNsq", "pbctSqnc")) or None,
+                   "min": num(gi(r, "lowstBidPrcIndctCont", "lowstBidPrc", "minBidPrc")),
+                   "bgn": _bgn(r), "end": _end(r), "st": gi(r, "pbctStatNm")} for r in rows]
+        out.append((cur, ladder))
+    return out
+
 # ── 지오코딩 ─────────────────────────────────────────────────────────────
 def parse_addr(full):
     s = re.sub(r"\s*외\s*\d+\s*필지", "", full or "").strip()
@@ -110,6 +142,7 @@ def parse_addr(full):
     return (f"{m.group(1)} {m.group(2)} {m.group(3)} {m.group(4)}", bldg, m.group(3), m.group(4))
 
 def geocode(jibun_addr, bldg, cache):
+    """[경도, 위도, 법정동코드10]. 법정동코드는 단지정보 조회(PNU 대체용)로 쓴다."""
     for q in [jibun_addr, f"{jibun_addr} {bldg}".strip()]:
         if not q: continue
         if cache.get(q): return cache[q]
@@ -118,34 +151,78 @@ def geocode(jibun_addr, bldg, cache):
                 docs = json.loads(http_get(url + urllib.parse.quote(q),
                        headers={"Authorization": f"KakaoAK {KAKAO_REST}"})).get("documents", [])
                 if docs:
-                    c = [float(docs[0]["x"]), float(docs[0]["y"])]
+                    d0 = docs[0]
+                    ad = d0.get("address") or d0.get("road_address") or {}
+                    bcode = (ad.get("b_code") or "")[:10]
+                    c = [float(d0["x"]), float(d0["y"]), bcode]
                     cache[q] = c; return c
             except Exception: pass
             time.sleep(0.05)
     return None
 
-# ── 아파트 단지정보 (세대수 등) ───────────────────────────────────────────
-_APT_LIST_OP  = {"op": None}
-_APT_BASIS_OP = {"op": None}
-_BJD_CACHE = {}     # bjdCode → [(kaptCode, kaptName)]
-_KAPT_CACHE = {}    # kaptCode → dict
+# ── 온비드 상세(딥링크용 ID) ──────────────────────────────────────────────
+_DTL_OP, _DUMPED = {"op": None}, {"x": False}
+
+_DTL_ERR = {"n": 0}
+
+def fetch_detail(mng, cdtn):
+    if not (mng and cdtn):
+        if _DTL_ERR["n"] < 1:
+            _DTL_ERR["n"] += 1
+            print(f"  [상세] 키 부족 → 호출 생략 (cltrMngNo={mng!r}, pbctCdtnNo={cdtn!r})")
+        return {}
+    ops = [_DTL_OP["op"]] if _DTL_OP["op"] else DTL_OPS
+    for op in ops:
+        q = urllib.parse.urlencode({"serviceKey": DATA_KEY, "cltrMngNo": mng, "pbctCdtnNo": cdtn,
+                                    "resultType": "json", "numOfRows": 10, "pageNo": 1}, safe="=")
+        try:
+            raw = http_get(f"{DTL_BASE}/{op}?{q}")
+            d = json.loads(raw)
+        except Exception as e:
+            if _DTL_ERR["n"] < 10:
+                _DTL_ERR["n"] += 1
+                body = e.read().decode("utf-8", "ignore")[:180] if hasattr(e, "read") else str(e)[:180]
+                print(f"  [상세] {op} 실패: {body}")
+            continue
+        body = d.get("response", d).get("body", {})
+        it = body.get("items") or {}
+        it = it.get("item", []) if isinstance(it, dict) else it
+        if isinstance(it, dict): it = [it]
+        if not it: continue
+        if not _DTL_OP["op"]:
+            _DTL_OP["op"] = op; print(f"  [상세] 오퍼레이션 '{op}' 사용")
+        if not _DUMPED["x"]:
+            _DUMPED["x"] = True
+            print("  [상세필드] " + json.dumps(it[0], ensure_ascii=False)[:1500])
+        return it[0]
+    return {}
+
+def onbid_ids(dtl, cdtn):
+    """온비드 물건상세 URL 파라미터. 4개 ID가 다 모여야 링크 생성."""
+    o = {"plnmNo": gi(dtl, "plnmNo", "onbidPbancNo", "pbancNo"),
+         "pbctNo": gi(dtl, "pbctNo"),
+         "cltrNo": gi(dtl, "cltrNo", "onbidCltrno"),
+         "cltrHstrNo": gi(dtl, "cltrHstrNo"),
+         "pbctCdtnNo": gi(dtl, "pbctCdtnNo") or cdtn,
+         "scrnGrpCd": gi(dtl, "scrnGrpCd", "cltrScrnGrpCd") or "0001"}
+    return o if all(o[k] for k in ("plnmNo", "pbctNo", "cltrNo", "cltrHstrNo")) else {}
+
+# ── 아파트 단지정보 ───────────────────────────────────────────────────────
+_APT_LIST_OP, _APT_BASIS_OP = {"op": None}, {"op": None}
+_BJD_CACHE, _KAPT_CACHE = {}, {}
 
 def apt_list_by_bjd(bjd):
-    """법정동코드 → 그 동의 공동주택 단지 목록"""
     if bjd in _BJD_CACHE: return _BJD_CACHE[bjd]
     ops = [_APT_LIST_OP["op"]] if _APT_LIST_OP["op"] else APT_LIST_OPS
     res = []
     for op in ops:
         q = urllib.parse.urlencode({"serviceKey": DATA_KEY, "bjdCode": bjd,
                                     "numOfRows": 200, "pageNo": 1}, safe="=")
-        try:
-            its = xml_items(http_get(f"{APT_LIST_BASE}/{op}?{q}"))
-        except Exception:
-            continue
+        try: its = xml_items(http_get(f"{APT_LIST_BASE}/{op}?{q}"))
+        except Exception: continue
         if its or _APT_LIST_OP["op"]:
             if not _APT_LIST_OP["op"]:
-                _APT_LIST_OP["op"] = op
-                print(f"  [단지목록] 오퍼레이션 '{op}' 사용")
+                _APT_LIST_OP["op"] = op; print(f"  [단지목록] 오퍼레이션 '{op}' 사용")
             res = [(g(it, "kaptCode", "kaptcode"), g(it, "kaptName", "kaptname")) for it in its]
             break
     _BJD_CACHE[bjd] = res
@@ -158,14 +235,11 @@ def apt_basis(kapt):
     info = {}
     for op in ops:
         q = urllib.parse.urlencode({"serviceKey": DATA_KEY, "kaptCode": kapt}, safe="=")
-        try:
-            its = xml_items(http_get(f"{APT_BASIS_BASE}/{op}?{q}"))
-        except Exception:
-            continue
+        try: its = xml_items(http_get(f"{APT_BASIS_BASE}/{op}?{q}"))
+        except Exception: continue
         if its:
             if not _APT_BASIS_OP["op"]:
-                _APT_BASIS_OP["op"] = op
-                print(f"  [단지정보] 오퍼레이션 '{op}' 사용")
+                _APT_BASIS_OP["op"] = op; print(f"  [단지정보] 오퍼레이션 '{op}' 사용")
             it = its[0]
             info = {"hh": num(g(it, "kaptdaCnt")), "dong": num(g(it, "kaptDongCnt")),
                     "used": g(it, "kaptUsedate"), "heat": g(it, "codeHeatNm"),
@@ -175,16 +249,27 @@ def apt_basis(kapt):
     time.sleep(0.05)
     return info
 
-def apt_info(pnu, bldg):
-    """PNU(19자리) 앞 10자리 = 법정동코드 → 단지 매칭 → 세대수 등"""
-    if not pnu or len(pnu) < 10 or not bldg: return {}
-    cands = apt_list_by_bjd(pnu[:10])
-    key = nrm(bldg)
+_MATCH_STAT = {"try": 0, "hit": 0, "nobjd": 0}
+
+def apt_info(pnu, bjd, bldg):
+    """공동주택 단지목록에 이름이 잡히면 = 아파트로 확정(+세대수·동수·사용승인일).
+       - 법정동코드: 온비드 PNU 앞10자리 → 없으면 카카오 지오코딩의 b_code 사용
+       - 이름: '제105동', '제씨동', '아파트' 같은 꼬리표를 떼고 부분일치
+       온비드 용도가 '기타주거용건물'로 잘못 찍힌 아파트(예: 여의도자이)도 여기서 구제된다."""
+    code10 = (pnu or "")[:10] if pnu and len(pnu) >= 10 else (bjd or "")
+    if not bldg: return {}
+    if not code10 or len(code10) < 10:
+        _MATCH_STAT["nobjd"] += 1
+        return {}
+    base = re.sub(r"\s*제?\s*[0-9A-Za-z가-힣]{0,4}동\s*$", "", bldg).strip()  # 제105동/제씨동 제거
+    key = nrm(base) or nrm(bldg)
     if not key: return {}
-    for code, name in cands:
+    _MATCH_STAT["try"] += 1
+    for kcode, name in apt_list_by_bjd(code10):
         n = nrm(name)
         if n and (n in key or key in n):
-            return apt_basis(code)
+            _MATCH_STAT["hit"] += 1
+            return apt_basis(kcode)
     return {}
 
 # ── 실거래 ────────────────────────────────────────────────────────────────
@@ -205,14 +290,11 @@ def _fetch_deal_chunk(lawd, kind, ym):
     except Exception: return kind, ym, []
 
 def load_deals(lawd):
-    """실거래 3종류 x 24개월 = 최대 72개 호출. I/O 대기가 대부분이라 동시에 쏜다."""
     if lawd in _DEAL: return _DEAL[lawd]
     by_jb, by_nm = {}, {}
-    jobs = [(kind, ym) for kind in ("apt", "rh", "silv") for ym in ym_list(REALDEAL_MONTHS)]
+    jobs = [(k, ym) for k in ("apt", "rh", "silv") for ym in ym_list(REALDEAL_MONTHS)]
     with ThreadPoolExecutor(max_workers=10) as ex:
-        futs = [ex.submit(_fetch_deal_chunk, lawd, kind, ym) for kind, ym in jobs]
-        for f in as_completed(futs):
-            kind, ym, its = f.result()
+        for kind, ym, its in ex.map(lambda j: _fetch_deal_chunk(lawd, j[0], j[1]), jobs):
             for it in its:
                 amt = num(g(it, "dealAmount", "거래금액"))
                 if not amt: continue
@@ -236,79 +318,74 @@ def deal_history(lawd, umd, jibun, bldg, area):
     return sorted(same or recs, key=lambda r: r["ym"], reverse=True)[:24]
 
 # ── 가공 ─────────────────────────────────────────────────────────────────
-RESI = ("아파트", "연립", "다세대", "빌라", "단독", "다가구", "도시형생활주택", "주거용")
+RESI  = ("아파트", "연립", "다세대", "빌라", "단독", "다가구", "도시형생활주택", "주거용")
+VILLA = ("다세대", "다가구", "단독")     # ★사용자 정의: 이 셋만 빌라
 
-def _process_one(it, gu, lawd, gc):
-    """물건 1건 처리: 필터→지오코딩→실거래→단지정보. tag로 어느 단계까지 통과했는지 표시."""
-    use  = f"{it.get('cltrUsgMclsCtgrNm','')} {it.get('cltrUsgSclsCtgrNm','')}"
-    full = (it.get("onbidCltrNm") or "").strip()
+def _process_one(pack, gu, lawd, gc):
+    it, ladder = pack
+    use  = f"{gi(it,'cltrUsgMclsCtgrNm')} {gi(it,'cltrUsgSclsCtgrNm')}"
+    full = (gi(it, "onbidCltrNm") or "").strip()
     if "오피스텔" in use: return "skip", None
     if not any(k in use for k in RESI): return "skip", None
 
-    area = fnum(it.get("bldSqms"))
+    area = fnum(gi(it, "bldSqms"))
     if area is not None and area < MIN_AREA: return "resi", None
 
-    minp, aprs = num(it.get("lowstBidPrcIndctCont")), num(it.get("apslEvlAmt"))
-    is_apt = "아파트" in use
-    if (not is_apt) and minp and minp > VILLA_CAP: return "area", None
+    minp = num(gi(it, "lowstBidPrcIndctCont", "lowstBidPrc", "minBidPrc"))
+    aprs = num(gi(it, "apslEvlAmt"))
 
     jibun_addr, bldg, umd, jibun = parse_addr(full)
     coord = geocode(jibun_addr or f"{REGION_SD} {gu}", bldg, gc)
-    if not coord: return "price", None
+    if not coord: return "area", None
+    bjd = coord[2] if len(coord) > 2 else ""
+
+    apt = apt_info(gi(it, "ltnoPnu"), bjd, bldg)
+    if "아파트" in use or apt.get("hh"): typ = "apt"
+    elif any(k in use for k in VILLA):   typ = "villa"
+    else:                                typ = "etc"
 
     hist = deal_history(lawd, umd, jibun, bldg, area) if umd else []
     last = hist[0]["amt"] * 10000 if hist else None
     avg  = int(sum(h["amt"] for h in hist) / len(hist) * 10000) if hist else None
-    apt  = apt_info(it.get("ltnoPnu", ""), bldg) if is_apt else {}
 
     row = {
-        "id": it.get("cltrMngNo", ""), "name": bldg or f"{umd} {jibun}",
-        "addr": full, "gu": gu, "emd": umd, "jibun": jibun,
-        "use": it.get("cltrUsgSclsCtgrNm", "") or it.get("cltrUsgMclsCtgrNm", ""),
-        "isApt": is_apt, "kind": it.get("prptDivNm", ""),
-        "area": area or "", "land": fnum(it.get("landSqms")) or "",
-        "min": minp, "aprs": aprs, "disc": it.get("apslPrcCtrsLowstBidRto", ""),
-        "fail": num(it.get("usbdNft")), "round": num(it.get("pbctNsq")),
-        "status": it.get("pbctStatNm", ""), "end": it.get("cltrBidEndDt", ""),
-        "org": it.get("orgNm", ""),
-        "thumb": (it.get("thnlImgUrlAdr") or "").replace("&amp;", "&"),
+        "id": gi(it, "cltrMngNo"), "cd": gi(it, "pbctCdtnNo"),
+        "name": bldg or f"{umd} {jibun}", "addr": full, "gu": gu, "emd": umd, "jibun": jibun,
+        "use": gi(it, "cltrUsgSclsCtgrNm") or gi(it, "cltrUsgMclsCtgrNm"),
+        "type": typ, "isApt": typ == "apt", "kind": gi(it, "prptDivNm"),
+        "area": area or "", "land": fnum(gi(it, "landSqms")) or "",
+        "min": minp, "aprs": aprs,
+        "disc": round(minp / aprs * 100) if (minp and aprs) else None,
+        "fail": num(gi(it, "usbdNft")), "round": num(gi(it, "pbctNsq", "pbctSqnc")),
+        "status": gi(it, "pbctStatNm"), "bgn": _bgn(it), "end": _end(it),
+        "ladder": ladder, "rounds": len(ladder),
+        "org": gi(it, "orgNm"),
+        "thumb": (gi(it, "thnlImgUrlAdr") or "").replace("&amp;", "&"),
         "deal": last, "dealAvg": avg,
         "hist": [{"ym": h["ym"], "amt": h["amt"] * 10000, "area": h["area"], "fl": h["floor"]} for h in hist],
         "gap": (last - minp) if (last and minp) else None,
         "hh": apt.get("hh"), "dong": apt.get("dong"), "used": apt.get("used"),
-        "heat": apt.get("heat"), "kaptName": apt.get("kaptName"),
+        "heat": apt.get("heat"), "hall": apt.get("hall"), "kaptName": apt.get("kaptName"),
         "lat": coord[1], "lng": coord[0]}
+    row["on"] = onbid_ids(fetch_detail(row["id"], row["cd"]), row["cd"])
     return "ok", row
 
-# tag가 어디까지 통과했는지를 뜻함: skip(대상아님) < resi(주거용통과전 탈락)
-# < area(면적통과, 가격탈락) < price(가격통과, 지오코딩탈락) < ok(전부통과)
-_STAGE = {"resi": 1, "area": 2, "price": 3, "ok": 4}
+_STAGE = {"resi": 1, "area": 2, "ok": 3}
 
 def build(items, gu, gc):
     lawd = SEOUL_GU[gu]
-    stat = {"입력": len(items), "주거용": 0, "면적": 0, "가격": 0, "지오코딩": 0}
+    packs = group_rounds(items)
+    stat = {"행": len(items), "물건": len(packs), "주거용": 0, "면적": 0, "지오코딩": 0}
     rows = []
-    # 지오코딩·실거래·단지정보 조회는 물건마다 독립적인 네트워크 호출 → 동시에 처리
     with ThreadPoolExecutor(max_workers=6) as ex:
-        for tag, row in ex.map(lambda it: _process_one(it, gu, lawd, gc), items):
+        for tag, row in ex.map(lambda p: _process_one(p, gu, lawd, gc), packs):
             lvl = _STAGE.get(tag, 0)
             if lvl >= 1: stat["주거용"] += 1
             if lvl >= 2: stat["면적"] += 1
-            if lvl >= 3: stat["가격"] += 1
-            if lvl >= 4: stat["지오코딩"] += 1; rows.append(row)
-
-    best = {}
-    for r in rows:   # 회차 중복: 최저입찰가가 가장 낮은 행(=현재 회차)만 채택
-        k = r["id"] or f"{r['addr']}|{r['area']}"
-        cur = best.get(k)
-        if not cur or (r["min"] or 9e18) < (cur["min"] or 9e18):
-            r["rounds"] = (cur["rounds"] + 1) if cur else 1
-            best[k] = r
-        else:
-            cur["rounds"] = cur.get("rounds", 1) + 1
-    out = list(best.values())
-    print(f"    {gu}: " + " → ".join(f"{k} {v}" for k, v in stat.items()) + f" → 물건 {len(out)}건")
-    return out
+            if lvl >= 3: stat["지오코딩"] += 1; rows.append(row)
+    print(f"    {gu}: " + " → ".join(f"{k} {v}" for k, v in stat.items()) + f" → 물건 {len(rows)}건"
+          f" (아파트 {sum(1 for r in rows if r['type']=='apt')}, 세대수확보 {sum(1 for r in rows if r.get('hh'))})")
+    return rows
 
 # ── 알림 ─────────────────────────────────────────────────────────────────
 def read_prev():
@@ -344,15 +421,16 @@ if __name__ == "__main__":
     if not kakao_selftest(): sys.exit(1)
 
     gus = [ONLY_GU] if ONLY_GU in SEOUL_GU else list(SEOUL_GU)
-    print(f"수집 시작 — 서울 {len(gus)}개 구")
+    print(f"수집 시작 — 서울 {len(gus)}개 구 (기준 {now_kst()} KST)")
 
     gc = {}
     if os.path.exists(fp("geocode_cache.json")):
-        gc = {k: v for k, v in json.load(open(fp("geocode_cache.json"), encoding="utf-8")).items() if v}
+        # 법정동코드(3번째 값)가 없는 구버전 캐시는 버리고 다시 지오코딩한다(세대수 조회에 필요)
+        gc = {k: v for k, v in json.load(open(fp("geocode_cache.json"), encoding="utf-8")).items()
+              if v and len(v) >= 3}
 
     prev_ids = {x.get("id") for x in read_prev() if x.get("id")}
-    cur = []
-    t0 = time.time()
+    cur, t0 = [], time.time()
     for i, gu in enumerate(gus, 1):
         print(f"[{i}/{len(gus)}] {gu} 시작 — 경과 {int(time.time()-t0)}초")
         items = fetch_list(gu)
@@ -364,7 +442,12 @@ if __name__ == "__main__":
     open(fp("data.js"), "w", encoding="utf-8").write(
         "window.GONMAE = " + json.dumps(cur, ensure_ascii=False) + ";\n"
         "window.GONMAE_AT = " + json.dumps(time.strftime("%Y-%m-%d %H:%M", time.localtime(time.time() + 9 * 3600))) + ";")
-    print(f"완료: 총 {len(cur)}건 → data.js")
+    print(f"[단지매칭] 시도 {_MATCH_STAT['try']} / 성공 {_MATCH_STAT['hit']} / 법정동코드없음 {_MATCH_STAT['nobjd']}")
+    print(f"완료: 총 {len(cur)}건 → data.js "
+          f"(아파트 {sum(1 for x in cur if x['type']=='apt')} / "
+          f"빌라 {sum(1 for x in cur if x['type']=='villa')} / "
+          f"기타 {sum(1 for x in cur if x['type']=='etc')} / "
+          f"온비드링크 {sum(1 for x in cur if x['on'])}건)")
 
     new = [x for x in cur if x["id"] and x["id"] not in prev_ids]
     if new or FORCE_NOTIFY:
@@ -376,4 +459,3 @@ if __name__ == "__main__":
         kakao_send("\n".join(lines), PAGE_URL)
     else:
         print("  신규 0건 → 알림 생략")
-
