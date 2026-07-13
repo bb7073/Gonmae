@@ -1,98 +1,264 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-<meta name="apple-mobile-web-app-capable" content="yes" />
-<title>공매 지도</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>공매 헌터</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0F1216">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+<script>const KAKAO_JS_KEY = "9a5c9457313bde76febd1abc9f4056cc";</script>
+
 <style>
-  *{box-sizing:border-box} html,body{margin:0;height:100%;font-family:-apple-system,"Malgun Gothic",sans-serif}
-  #map{width:100%;height:100%}
-  #panel{position:absolute;z-index:5;top:8px;left:8px;right:8px;background:rgba(255,255,255,.96);
-         border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.2);padding:10px 12px;font-size:13px}
-  #panel h1{font-size:14px;margin:0 0 6px}
-  #panel .cnt{color:#c0392b;font-weight:700}
-  .ctl{display:flex;align-items:center;gap:8px;margin:6px 0}
-  .ctl label{width:74px;color:#555;flex:none}
-  .ctl input[type=range]{flex:1}
-  .ctl .val{width:56px;text-align:right;font-weight:700;flex:none}
-  .chips{display:flex;gap:6px;margin-top:4px}
-  .chip{padding:4px 10px;border:1px solid #ccc;border-radius:16px;cursor:pointer;user-select:none}
-  .chip.on{background:#2662f0;color:#fff;border-color:#2662f0}
-  #toggle{position:absolute;z-index:6;top:8px;right:12px;background:#fff;border:none;border-radius:8px;
-          padding:6px 10px;box-shadow:0 1px 5px rgba(0,0,0,.2);font-weight:700}
-  .iw{padding:10px 12px;font-size:13px;line-height:1.5;width:225px}
-  .iw img{width:100%;height:105px;object-fit:cover;border-radius:6px;margin-bottom:6px;background:#eee}
-  .iw .badge{display:inline-block;font-size:11px;padding:1px 6px;border-radius:4px;background:#eef;margin:2px 3px 4px 0}
-  .iw .row{display:flex;justify-content:space-between;gap:10px}
-  .iw .min{color:#c0392b;font-weight:700}.iw .gap{color:#1a7f37;font-weight:700}
-  .iw a{display:block;text-align:center;margin-top:7px;padding:7px;background:#03c75a;color:#fff;border-radius:6px;text-decoration:none;font-weight:700}
+:root{
+  --bg:#0F1216; --surface:#171C22; --surface2:#1E252D; --line:#2A333D;
+  --text:#E9EEF3; --muted:#8B98A5; --accent:#FFC24B; --good:#3ED598; --warn:#FF6B6B;
+  --r:14px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Noto Sans KR",sans-serif;
+  padding-bottom:calc(64px + env(safe-area-inset-bottom));}
+.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+header{position:sticky;top:0;z-index:20;background:rgba(15,18,22,.92);backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line);padding:14px 16px 10px;}
+h1{margin:0;font-size:19px;letter-spacing:-.3px;display:flex;align-items:center;gap:8px}
+h1 small{font-weight:400;color:var(--muted);font-size:12px}
+.controls{display:flex;gap:6px;overflow-x:auto;margin-top:10px;padding-bottom:2px;scrollbar-width:none}
+.controls::-webkit-scrollbar{display:none}
+select,.chip{background:var(--surface2);color:var(--text);border:1px solid var(--line);
+  border-radius:999px;padding:7px 12px;font-size:13px;white-space:nowrap;flex:0 0 auto}
+.chip.on{background:var(--accent);color:#101317;border-color:var(--accent);font-weight:700}
+
+main{padding:12px 12px 0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  padding:12px;margin-bottom:10px;display:flex;gap:12px;align-items:stretch;cursor:pointer}
+.card:active{background:var(--surface2)}
+.thumb{width:74px;height:74px;border-radius:10px;object-fit:cover;background:var(--surface2);flex:0 0 auto}
+.info{flex:1;min-width:0}
+.line1{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
+.tag{background:var(--surface2);border-radius:6px;padding:2px 6px;font-size:11px}
+.tag.apt{background:#24384A;color:#8FC7FF}
+.nm{font-size:15px;font-weight:700;margin:4px 0 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.addr{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prices{display:flex;gap:10px;align-items:baseline;margin-top:6px}
+.min{font-size:17px;font-weight:800}
+.aprs{font-size:12px;color:var(--muted);text-decoration:line-through}
+/* 시그니처: 실거래 대비 최저가 위치를 보여주는 갭 게이지 */
+.gauge{margin-top:8px;height:6px;border-radius:3px;background:var(--surface2);position:relative;overflow:hidden}
+.gauge i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--good),var(--accent));border-radius:3px}
+.gaptxt{font-size:11px;color:var(--good);margin-top:5px}
+.gaptxt.none{color:var(--muted)}
+
+/* 지도 */
+#mapview{display:none;position:fixed;inset:0;bottom:calc(64px + env(safe-area-inset-bottom))}
+#map{width:100%;height:100%}
+body.mapmode #mapview{display:block}
+body.mapmode header,body.mapmode main{display:none}
+
+/* 하단 탭 */
+nav{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;
+  background:rgba(15,18,22,.96);backdrop-filter:blur(10px);border-top:1px solid var(--line);
+  padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;background:none;border:0;color:var(--muted);padding:12px 0 14px;font-size:12px;font-weight:600}
+nav button.on{color:var(--accent)}
+nav button b{display:block;font-size:17px;margin-bottom:2px}
+
+/* 상세 시트 */
+#sheet{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.6);display:none}
+#sheet.on{display:block}
+.sheetbody{position:absolute;left:0;right:0;bottom:0;max-height:92vh;overflow:auto;
+  background:var(--bg);border-radius:20px 20px 0 0;border-top:1px solid var(--line);
+  padding:8px 16px calc(24px + env(safe-area-inset-bottom))}
+.grip{width:40px;height:4px;border-radius:2px;background:var(--line);margin:6px auto 14px}
+.hero{width:100%;height:180px;object-fit:cover;border-radius:12px;background:var(--surface2)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:14px;margin:14px 0}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;text-align:right;font-weight:600}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:16px 0 4px}
+.btns a,.btns button{display:block;text-align:center;text-decoration:none;padding:13px 0;border-radius:12px;
+  font-size:14px;font-weight:700;border:1px solid var(--line);background:var(--surface);color:var(--text)}
+.btns .primary{background:var(--accent);color:#101317;border-color:var(--accent)}
+h3{font-size:14px;margin:22px 0 8px;color:var(--muted);font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:13px}
+td,th{padding:8px 4px;border-bottom:1px solid var(--line);text-align:right}
+th{color:var(--muted);font-weight:500;font-size:12px}
+td:first-child,th:first-child{text-align:left}
+.empty{color:var(--muted);font-size:13px;padding:14px;background:var(--surface);border-radius:12px;text-align:center}
 </style>
 </head>
 <body>
-<button id="toggle">필터 ▾</button>
-<div id="panel">
-  <h1>공매 물건 <span class="cnt" id="cnt">0</span>건</h1>
-  <div class="ctl"><label>최저가 ≤</label><input type="range" id="price" min="1" max="20" step="1" value="20"><span class="val" id="priceV">전체</span></div>
-  <div class="ctl"><label>전용 ≥</label><input type="range" id="area" min="0" max="85" step="5" value="25"><span class="val" id="areaV">25㎡</span></div>
-  <div class="ctl"><label>용도</label>
-    <div class="chips"><span class="chip on" data-k="apt">아파트</span><span class="chip on" data-k="villa">빌라</span></div>
+
+<header>
+  <h1>공매 헌터 <small id="meta"></small></h1>
+  <div class="controls">
+    <select id="sort">
+      <option value="gap">실거래 차액 큰 순</option>
+      <option value="min">최저입찰가 낮은 순</option>
+      <option value="disc">감정가 대비 저렴한 순</option>
+      <option value="fail">유찰 많은 순</option>
+      <option value="end">마감 임박 순</option>
+    </select>
+    <select id="gu"><option value="">서울 전체</option></select>
+    <button class="chip" id="fApt">아파트</button>
+    <button class="chip" id="fVilla">빌라·주택</button>
   </div>
-</div>
-<div id="map"></div>
+</header>
+
+<main id="list"></main>
+
+<div id="mapview"><div id="map"></div></div>
+
+<nav>
+  <button id="tabList" class="on"><b>▤</b>목록</button>
+  <button id="tabMap"><b>◎</b>지도</button>
+</nav>
+
+<div id="sheet"><div class="sheetbody" id="sheetbody"></div></div>
 
 <script src="data.js"></script>
-<script src="//dapi.kakao.com/v2/maps/sdk.js?appkey=9a5c9457313bde76febd1abc9f4056cc&libraries=clusterer"></script>
 <script>
-  const eok=v=>v==null||v===0?"-":(v/1e8).toFixed(2).replace(/\.?0+$/,"")+"억";
-  const S={price:20,area:25,apt:true,villa:true};
-  let map,cl,iw,ALL=[];
-  function pass(d){
-    if(S.price<20 && d.min && d.min>S.price*1e8) return false;
-    if(d.area && parseFloat(d.area)<S.area) return false;
-    if(d.isApt && !S.apt) return false;
-    if(!d.isApt && !S.villa) return false;
-    return true;
-  }
-  function render(){
-    const data=ALL.filter(pass).sort((a,b)=>{
-      if(a.gap!=null||b.gap!=null) return (b.gap??-1e18)-(a.gap??-1e18);
-      return (parseFloat(a.disc)||999)-(parseFloat(b.disc)||999);
-    });
-    document.getElementById("cnt").textContent=data.length;
-    cl.clear();
-    const ms=data.map(d=>{
-      const m=new kakao.maps.Marker({position:new kakao.maps.LatLng(d.lat,d.lng)});
-      kakao.maps.event.addListener(m,"click",()=>{
-        let h=`<div class="iw">`;
-        if(d.thumb) h+=`<img src="${d.thumb}" onerror="this.style.display='none'">`;
-        h+=`<span class="badge">${d.use||""}</span><span class="badge">${d.area||"?"}㎡</span>`
-         +(d.fail?`<span class="badge">유찰 ${d.fail}회</span>`:"")
-         +`<br><b>${d.name||""}</b><br>`
-         +`<div class="row"><span>공매 최저</span><span class="min">${eok(d.min)}</span></div>`
-         +`<div class="row"><span>감정가</span><span>${eok(d.aprs)}${d.disc?` (${d.disc}%)`:""}</span></div>`;
-        if(d.deal!=null) h+=`<div class="row"><span>최근 실거래</span><span>${eok(d.deal)}</span></div>`;
-        if(d.gap!=null) h+=`<div class="row"><span>실거래−공매</span><span class="gap">+${eok(d.gap)}</span></div>`;
-        h+=`<a href="${d.naver}" target="_blank">네이버 부동산에서 보기</a></div>`;
-        iw.setContent(h); iw.open(map,m);
-      });
+const D = window.GONMAE || [];
+const $ = s => document.querySelector(s);
+const eok = v => v ? (v/1e8).toFixed(2) + '억' : '—';
+const ymd = s => s ? String(s).replace(/(\d{4})(\d{2})(\d{2}).*/, '$1.$2.$3') : '—';
+let state = {sort:'gap', gu:'', apt:true, villa:true};
+
+document.getElementById('meta').textContent = `${D.length}건 · ${window.GONMAE_AT || ''}`;
+[...new Set(D.map(d => d.gu))].sort().forEach(g => {
+  const o = document.createElement('option'); o.value = o.textContent = g; $('#gu').append(o);
+});
+
+function filtered(){
+  let r = D.filter(d => (!state.gu || d.gu === state.gu) && (d.isApt ? state.apt : state.villa));
+  const key = {
+    gap:  (a,b) => (b.gap||-1) - (a.gap||-1),
+    min:  (a,b) => (a.min||9e18) - (b.min||9e18),
+    disc: (a,b) => (parseFloat(a.disc)||999) - (parseFloat(b.disc)||999),
+    fail: (a,b) => (b.fail||0) - (a.fail||0),
+    end:  (a,b) => String(a.end||'99999999').localeCompare(String(b.end||'99999999')),
+  }[state.sort];
+  return r.sort(key);
+}
+
+function render(){
+  const rows = filtered();
+  const el = $('#list');
+  if(!rows.length){ el.innerHTML = '<div class="empty">조건에 맞는 물건이 없습니다. 필터를 넓혀보세요.</div>'; return; }
+  el.innerHTML = rows.map((d,i) => {
+    const ratio = (d.deal && d.min) ? Math.max(6, Math.min(100, d.min / d.deal * 100)) : 0;
+    const gapTxt = d.gap ? `실거래 ${eok(d.deal)} 대비 <b>${eok(d.gap)} 낮음</b>`
+                         : '실거래 매칭 없음';
+    return `<div class="card" data-i="${i}">
+      ${d.thumb ? `<img class="thumb" src="${d.thumb}" loading="lazy" onerror="this.style.visibility='hidden'">` : '<div class="thumb"></div>'}
+      <div class="info">
+        <div class="line1">
+          <span class="tag ${d.isApt?'apt':''}">${d.use||'주거'}</span>
+          <span>${d.gu}</span>
+          ${d.fail ? `<span>· 유찰 ${d.fail}회</span>` : ''}
+        </div>
+        <div class="nm">${d.name || d.addr}</div>
+        <div class="addr">${d.addr}</div>
+        <div class="prices num"><span class="min">${eok(d.min)}</span><span class="aprs">${eok(d.aprs)}</span><span class="addr">${d.area ? d.area+'㎡' : ''}</span></div>
+        <div class="gauge"><i style="width:${ratio}%"></i></div>
+        <div class="gaptxt ${d.gap?'':'none'}">${gapTxt}</div>
+      </div></div>`;
+  }).join('');
+  el.querySelectorAll('.card').forEach(c => c.onclick = () => openSheet(rows[+c.dataset.i]));
+}
+
+/* 상세 */
+function openSheet(d){
+  const q = encodeURIComponent(d.name || d.addr);
+  const hist = (d.hist || []);
+  const max = Math.max(...hist.map(h => h.amt), 1);
+  $('#sheetbody').innerHTML = `
+    <div class="grip"></div>
+    ${d.thumb ? `<img class="hero" src="${d.thumb}" onerror="this.remove()">` : ''}
+    <h2 style="font-size:19px;margin:14px 0 4px">${d.name || d.addr}</h2>
+    <div class="addr" style="font-size:13px;color:var(--muted)">${d.addr}</div>
+    <dl class="kv num">
+      <dt>최저입찰가</dt><dd style="color:var(--accent);font-size:17px">${eok(d.min)}</dd>
+      <dt>감정가</dt><dd>${eok(d.aprs)} <span style="color:var(--muted)">(${d.disc||'—'}%)</span></dd>
+      <dt>최근 실거래</dt><dd>${d.deal ? eok(d.deal) : '매칭 없음'}</dd>
+      <dt>실거래 평균 (2년)</dt><dd>${d.dealAvg ? eok(d.dealAvg) : '—'}</dd>
+      <dt>차액</dt><dd style="color:${d.gap>0?'var(--good)':'var(--muted)'}">${d.gap ? eok(d.gap) : '—'}</dd>
+      <dt>건물면적</dt><dd>${d.area || '—'}㎡</dd>
+      <dt>대지면적</dt><dd>${d.land || '—'}㎡</dd>
+      <dt>유찰 / 회차</dt><dd>${d.fail||0}회 / ${d.round||'—'}</dd>
+      <dt>입찰마감</dt><dd>${ymd(d.end)}</dd>
+      <dt>처분방식</dt><dd>${d.kind||'—'}</dd>
+      <dt>집행기관</dt><dd style="font-weight:400;font-size:13px">${d.org||'—'}</dd>
+      <dt>물건관리번호</dt><dd style="font-weight:400;font-size:13px">${d.id||'—'}</dd>
+    </dl>
+    <div class="btns">
+      <button class="primary" id="goMap">지도에서 보기</button>
+      <a href="https://map.kakao.com/link/map/${q},${d.lat},${d.lng}" target="_blank">카카오맵 앱 열기</a>
+      <a href="https://m.land.naver.com/search/result/${q}" target="_blank">네이버 부동산</a>
+      <a href="https://www.onbid.co.kr/op/ppa/plnmno/publicAnncListPage.do" target="_blank">온비드에서 검색</a>
+    </div>
+    <h3>이 번지의 실거래 내역 ${hist.length ? `(${hist.length}건 / 최근 2년)` : ''}</h3>
+    ${hist.length ? `<table>
+      <tr><th>거래월</th><th>층</th><th>전용</th><th>거래가</th><th>추이</th></tr>
+      ${hist.map(h => `<tr class="num">
+        <td>${h.ym.slice(0,4)}.${h.ym.slice(4)}</td><td>${h.fl||'—'}</td>
+        <td>${h.area||'—'}</td><td>${eok(h.amt)}</td>
+        <td style="width:70px"><span style="display:inline-block;height:6px;border-radius:3px;background:var(--accent);width:${h.amt/max*60}px"></span></td>
+      </tr>`).join('')}
+    </table>` : '<div class="empty">같은 번지의 실거래가 없습니다. 단독·다가구이거나 거래가 드문 물건입니다.</div>'}
+    <p style="color:var(--muted);font-size:12px;line-height:1.6;margin-top:18px">
+      실거래는 국토부 공개자료를 <b>법정동+지번</b>으로 매칭한 결과입니다. 같은 번지의 다른 호수·층이 섞일 수 있으니 입찰 전 온비드 원문과 등기부를 확인하세요.</p>
+  `;
+  $('#sheet').classList.add('on');
+  $('#goMap').onclick = () => { $('#sheet').classList.remove('on'); showMap(d); };
+}
+$('#sheet').onclick = e => { if(e.target.id === 'sheet') $('#sheet').classList.remove('on'); };
+
+/* 지도 */
+let map, clusterer, markers = [], mapReady = false;
+function initMap(cb){
+  if(mapReady) return cb && cb();
+  const s = document.createElement('script');
+  s.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_JS_KEY}&libraries=clusterer&autoload=false`;
+  s.onload = () => kakao.maps.load(() => {
+    map = new kakao.maps.Map($('#map'), {center:new kakao.maps.LatLng(37.5502,127.0), level:8});
+    clusterer = new kakao.maps.MarkerClusterer({map, averageCenter:true, minLevel:6});
+    markers = filtered().map(d => {
+      const m = new kakao.maps.Marker({position:new kakao.maps.LatLng(d.lat, d.lng), title:d.name});
+      kakao.maps.event.addListener(m, 'click', () => openSheet(d));
       return m;
     });
-    cl.addMarkers(ms);
-  }
-  kakao.maps.load(function(){
-    ALL=window.GONMAE||[];
-    const c0=ALL.length?new kakao.maps.LatLng(ALL[0].lat,ALL[0].lng):new kakao.maps.LatLng(37.5637,127.0826);
-    map=new kakao.maps.Map(document.getElementById("map"),{center:c0,level:5});
-    cl=new kakao.maps.MarkerClusterer({map,averageCenter:true,minLevel:6});
-    iw=new kakao.maps.InfoWindow({removable:true});
-    const price=document.getElementById("price"),area=document.getElementById("area");
-    price.oninput=()=>{S.price=+price.value;document.getElementById("priceV").textContent=S.price>=20?"전체":S.price+"억";render();};
-    area.oninput=()=>{S.area=+area.value;document.getElementById("areaV").textContent=S.area+"㎡";render();};
-    document.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{c.classList.toggle("on");S[c.dataset.k]=c.classList.contains("on");render();});
-    document.getElementById("toggle").onclick=()=>{const p=document.getElementById("panel");p.style.display=p.style.display==="none"?"block":"none";};
-    render();
+    clusterer.addMarkers(markers);
+    mapReady = true; cb && cb();
   });
+  s.onerror = () => $('#map').innerHTML = '<div class="empty" style="margin:20px">지도를 불러오지 못했습니다. index.html의 KAKAO_JS_KEY와 카카오 개발자센터의 Web 플랫폼 도메인 등록을 확인하세요.</div>';
+  document.head.append(s);
+}
+function showMap(focus){
+  document.body.classList.add('mapmode');
+  $('#tabMap').classList.add('on'); $('#tabList').classList.remove('on');
+  initMap(() => {
+    map.relayout();
+    if(focus){ map.setLevel(3); map.setCenter(new kakao.maps.LatLng(focus.lat, focus.lng)); }
+  });
+}
+$('#tabMap').onclick = () => showMap(null);
+$('#tabList').onclick = () => {
+  document.body.classList.remove('mapmode');
+  $('#tabList').classList.add('on'); $('#tabMap').classList.remove('on');
+};
+
+/* 컨트롤 */
+$('#sort').onchange = e => { state.sort = e.target.value; render(); };
+$('#gu').onchange   = e => { state.gu = e.target.value; render(); };
+$('#fApt').onclick  = e => { state.apt = !state.apt; e.target.classList.toggle('on', state.apt); render(); };
+$('#fVilla').onclick= e => { state.villa = !state.villa; e.target.classList.toggle('on', state.villa); render(); };
+$('#fApt').classList.add('on'); $('#fVilla').classList.add('on');
+render();
+
+if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>
 </body>
 </html>
