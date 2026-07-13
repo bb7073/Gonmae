@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 """
 공매(온비드) 수집 → data.js + 신규매물 카카오톡 알림
-v4: 실제 응답 필드명 확정 반영 / 지오코딩 주소정제·폴백·실패원인 출력
+v5: 카카오 키 셀프테스트 / 실패캐시 무시 / 지오코딩 시도내역 로깅
 """
 import json, os, re, sys, time, urllib.parse, urllib.request, urllib.error
 import xml.etree.ElementTree as ET
 
-DATA_KEY      = os.environ.get("DATA_KEY", "")
-KAKAO_REST    = os.environ.get("KAKAO_REST_KEY", "")
-KAKAO_REFRESH = os.environ.get("KAKAO_REFRESH_TOKEN", "")
+DATA_KEY      = os.environ.get("DATA_KEY", "").strip()
+KAKAO_REST    = os.environ.get("KAKAO_REST_KEY", "").strip()
+KAKAO_REFRESH = os.environ.get("KAKAO_REFRESH_TOKEN", "").strip()
 
 REGION_SD = os.environ.get("REGION_SD", "서울특별시")
 REGION_GU = os.environ.get("REGION_GU", "전체")   # "전체" 또는 "광진구,성동구"
@@ -17,11 +17,13 @@ REGION_GU = os.environ.get("REGION_GU", "전체")   # "전체" 또는 "광진구
 MAX_PAGES, ROWS = 8, 100
 REALDEAL_MONTHS = 6
 PRPT_DIV        = "0007,0005,0006,0008"
-MIN_AREA        = 25.0          # 전용 25㎡ 이상
-VILLA_CAP       = 800_000_000   # 빌라 8억 컷 (아파트는 무제한)
+MIN_AREA        = 25.0
+VILLA_CAP       = 800_000_000
 
 BASE = "https://apis.data.go.kr/B010003/OnbidRlstListSrvc2"
 OP   = "getRlstCltrList2"
+KAKAO_ADDR = "https://dapi.kakao.com/v2/local/search/address.json?query="
+KAKAO_KW   = "https://dapi.kakao.com/v2/local/search/keyword.json?query="
 RT = {"apt":"https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev",
       "rh": "https://apis.data.go.kr/1613000/RTMSDataSvcRHTrade/getRTMSDataSvcRHTrade",
       "silv":"https://apis.data.go.kr/1613000/RTMSDataSvcSilvTrade/getRTMSDataSvcSilvTrade"}
@@ -45,11 +47,35 @@ def http_get(url, headers=None, timeout=20):
     req = urllib.request.Request(url, headers=headers or {})
     return urllib.request.urlopen(req, timeout=timeout).read().decode("utf-8")
 
+# ── 카카오 셀프테스트 ─────────────────────────────────────────────────────
+def kakao_selftest():
+    print(f"[키체크] KAKAO_REST_KEY 길이={len(KAKAO_REST)} 앞4={KAKAO_REST[:4]}…")
+    probe = "서울특별시 광진구 화양동 530"
+    try:
+        raw = http_get(KAKAO_ADDR + urllib.parse.quote(probe),
+                       headers={"Authorization": f"KakaoAK {KAKAO_REST}"})
+        docs = json.loads(raw).get("documents", [])
+        print(f"[키체크] '{probe}' → HTTP 200, documents={len(docs)}")
+        if docs:
+            print(f"[키체크] 좌표 = x={docs[0]['x']} y={docs[0]['y']}  ✅ 키·주소검색 정상")
+            return True
+        print("[키체크] ⚠ 200인데 결과 0건 — 주소 질의 형식 문제")
+        print(f"[키체크] 응답 원문: {raw[:300]}")
+        return True
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", "ignore")[:300]
+        print(f"[키체크] ❌ HTTP {e.code} — {body}")
+        print("[키체크] → 401이면 REST API 키가 아님(자바스크립트 키 오입력) 또는 키 오타.")
+        print("[키체크] → 403이면 카카오 앱의 '허용 IP' 설정 때문입니다. IP 제한을 비우세요.")
+        return False
+    except Exception as e:
+        print(f"[키체크] ❌ 예외: {e}")
+        return False
+
 # ── 목록 조회 ─────────────────────────────────────────────────────────────
 def onbid_url(page, gu):
     p = {"serviceKey": DATA_KEY, "pageNo": page, "numOfRows": ROWS, "resultType": "json",
-         "prptDivCd": PRPT_DIV, "pvctTrgtYn": "N",
-         "lctnSdnm": REGION_SD, "lctnSggnm": gu}
+         "prptDivCd": PRPT_DIV, "pvctTrgtYn": "N", "lctnSdnm": REGION_SD, "lctnSggnm": gu}
     return f"{BASE}/{OP}?{urllib.parse.urlencode(p, safe='=,')}"
 
 def json_items(raw, label):
@@ -75,41 +101,46 @@ def fetch_list(gu):
         time.sleep(0.2)
     return out
 
-# ── 지오코딩 (카카오) ─────────────────────────────────────────────────────
-_geo_err = {"n": 0}
+# ── 지오코딩 ─────────────────────────────────────────────────────────────
+_glog = {"n": 0}
 
 def clean_addr(full):
-    """'서울특별시 광진구 화양동 530 씨즈건대힐스 제2층 제206호' → 후보 리스트"""
+    """'서울특별시 광진구 화양동 530 씨즈건대힐스 제2층 제206호' → 질의 후보"""
     s = re.sub(r"\s*외\s*\d+\s*필지", "", full or "").strip()
-    lv1 = re.sub(r"\s*제?\s*[지B]?\d+\s*층.*$", "", s).strip()           # 층 이하 절단
-    lv1 = re.sub(r"\s*제?\s*[\dA-Za-z\-]+\s*호\s*$", "", lv1).strip()    # 호 제거
-    m = re.search(r"(\S*시\s+\S+구\s+\S+동\s+(?:산\s*)?[\d\-]+)", s)      # 순수 지번
-    lv2 = m.group(1) if m else ""
-    return [c for c in (lv1, lv2, s) if c]
+    m = re.search(r"(\S*[시도]\s+\S+[구군]\s+\S+[동읍면가리]\s*(?:산\s*)?[\d\-]+)", s)
+    jibun = m.group(1) if m else ""                 # ① 순수 지번 (카카오 주소검색이 가장 잘 먹음)
+    lv1 = re.sub(r"\s*제?\s*[지B]?\d+\s*층.*$", "", s).strip()
+    lv1 = re.sub(r"\s*제?\s*[\dA-Za-z\-]+\s*호\s*$", "", lv1).strip()   # ② 층·호 제거(건물명까지)
+    return [c for c in (jibun, lv1, s) if c]
+
+def kakao_query(url, q):
+    raw = http_get(url + urllib.parse.quote(q), headers={"Authorization": f"KakaoAK {KAKAO_REST}"})
+    return json.loads(raw).get("documents", [])
 
 def geocode(cands, cache):
+    tried = []
     for addr in cands:
         if not addr: continue
-        if addr in cache:
-            if cache[addr]: return cache[addr]
-            continue
-        c = None
+        if cache.get(addr):            # 성공만 캐시 사용 (실패 캐시는 매번 재시도)
+            return cache[addr]
         try:
-            docs = json.loads(http_get(
-                "https://dapi.kakao.com/v2/local/search/address.json?query=" + urllib.parse.quote(addr),
-                headers={"Authorization": f"KakaoAK {KAKAO_REST}"}))["documents"]
-            if docs: c = [float(docs[0]["x"]), float(docs[0]["y"])]
+            docs = kakao_query(KAKAO_ADDR, addr)
+            tried.append(f"주소'{addr}'→{len(docs)}")
+            if not docs:               # 주소검색 실패 시 키워드검색으로 재시도
+                docs = kakao_query(KAKAO_KW, addr)
+                tried.append(f"키워드'{addr}'→{len(docs)}")
+            if docs:
+                c = [float(docs[0]["x"]), float(docs[0]["y"])]
+                cache[addr] = c
+                return c
         except urllib.error.HTTPError as e:
-            if _geo_err["n"] < 3:
-                _geo_err["n"] += 1
-                print(f"  ★지오코딩 HTTP {e.code} — 카카오 REST 키 문제로 보입니다 (addr={addr})")
+            tried.append(f"'{addr}'→HTTP{e.code}")
         except Exception as e:
-            if _geo_err["n"] < 3:
-                _geo_err["n"] += 1
-                print(f"  ★지오코딩 오류: {e} (addr={addr})")
-        cache[addr] = c
+            tried.append(f"'{addr}'→ERR {e}")
         time.sleep(0.08)
-        if c: return c
+    if _glog["n"] < 5:
+        _glog["n"] += 1
+        print("  ★지오코딩 실패: " + " | ".join(tried))
     return None
 
 # ── 실거래 ────────────────────────────────────────────────────────────────
@@ -156,17 +187,18 @@ def match(bldg, area, idx, kind):
             if not best or d["ym"] > best["ym"]: best = d
     return best
 
-# ── 가공 (필드명 확정) ────────────────────────────────────────────────────
+# ── 가공 ─────────────────────────────────────────────────────────────────
 RESI = ("아파트", "연립", "다세대", "빌라", "단독", "다가구", "도시형생활주택", "주거용")
 def build(items, gu):
     gc = json.load(open(fp("geocode_cache.json"), encoding="utf-8")) if os.path.exists(fp("geocode_cache.json")) else {}
+    gc = {k: v for k, v in gc.items() if v}          # 실패(null) 캐시 폐기
     stat = {"입력": len(items), "주거용": 0, "면적": 0, "가격": 0, "지오코딩": 0}
     deals = load_deals(SEOUL_GU.get(gu))
     out = []
 
     for it in items:
         use  = f"{it.get('cltrUsgMclsCtgrNm','')} {it.get('cltrUsgSclsCtgrNm','')}"
-        full = (it.get("onbidCltrNm") or "").strip()      # ← 전체 지번주소가 여기 들어있음
+        full = (it.get("onbidCltrNm") or "").strip()
         if "오피스텔" in use: continue
         if not any(k in use for k in RESI): continue
         stat["주거용"] += 1
@@ -187,7 +219,7 @@ def build(items, gu):
         if not coord: continue
         stat["지오코딩"] += 1
 
-        bldg = re.sub(r"^\S*시\s+\S+구\s+\S+동\s+[\d\-]+\s*", "", cands[0]).strip()
+        bldg = re.sub(r"^\S*[시도]\s+\S+[구군]\s+\S+[동읍면가리]\s*[\d\-]+\s*", "", cands[1] if len(cands) > 1 else full).strip()
         deal = match(bldg, area, deals, "apt" if is_apt else "rh")
         silv = match(bldg, area, deals, "silv") if is_apt else None
         gap  = (num(deal["amount"]) * 10000 - minp) if (deal and minp) else None
@@ -196,16 +228,12 @@ def build(items, gu):
             "name": bldg or full[:30], "addr": full, "gu": gu,
             "use": it.get("cltrUsgSclsCtgrNm", "") or it.get("cltrUsgMclsCtgrNm", ""),
             "isApt": is_apt, "area": area or "", "min": minp, "aprs": aprs,
-            "disc": it.get("apslPrcCtrsLowstBidRto", ""),
-            "fail": it.get("usbdNft", ""),
-            "status": it.get("pbctStatNm", ""),
-            "id": it.get("cltrMngNo", ""),
-            "end": it.get("cltrBidEndDt", ""),
-            "kind": it.get("prptDivNm", ""),
+            "disc": it.get("apslPrcCtrsLowstBidRto", ""), "fail": it.get("usbdNft", ""),
+            "status": it.get("pbctStatNm", ""), "id": it.get("cltrMngNo", ""),
+            "end": it.get("cltrBidEndDt", ""), "kind": it.get("prptDivNm", ""),
             "thumb": (it.get("thnlImgUrlAdr") or "").replace("&amp;", "&"),
             "deal": num(deal["amount"]) * 10000 if deal else None,
-            "silv": num(silv["amount"]) * 10000 if silv else None,
-            "gap": gap,
+            "silv": num(silv["amount"]) * 10000 if silv else None, "gap": gap,
             "naver": NAVER_TMPL.format(q=urllib.parse.quote(bldg or f"{gu} {it.get('lctnEmdNm','')}")),
             "lng": coord[0], "lat": coord[1]})
 
@@ -245,7 +273,9 @@ if __name__ == "__main__":
     if not DATA_KEY:
         print("ERROR: DATA_KEY 없음 (GitHub Secrets 확인)"); sys.exit(1)
     if not KAKAO_REST:
-        print("ERROR: KAKAO_REST_KEY 없음 → 지오코딩이 전부 실패합니다. Secrets에 등록하세요."); sys.exit(1)
+        print("ERROR: KAKAO_REST_KEY 없음 → 지오코딩 전부 실패"); sys.exit(1)
+    if not kakao_selftest():
+        print("→ 카카오 키 문제 확정. 수집 중단."); sys.exit(1)
 
     gus = list(SEOUL_GU) if REGION_GU in ("전체", "", "ALL") else [g.strip() for g in REGION_GU.split(",")]
     print(f"수집 시작 — 대상 {len(gus)}개 구")
