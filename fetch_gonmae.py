@@ -2,15 +2,13 @@
 # -*- coding: utf-8 -*-
 """
 공매(온비드) 수집 → data.js 생성 + 신규매물 카카오톡 알림 (서버/GitHub Actions용)
-- API 키는 코드에 없음. GitHub Secrets(환경변수)에서 읽음 → 안전.
-- 필터는 '주거용(아파트/빌라)만, 오피스텔 제외'까지만. 가격·면적은 폰 화면에서 조절.
 """
 import json, os, sys, time, urllib.parse, urllib.request
 import xml.etree.ElementTree as ET
 
-DATA_KEY  = os.environ.get("DATA_KEY", "")           # 공공데이터포털 인증키 (필수)
-KAKAO_REST= os.environ.get("KAKAO_REST_KEY", "")     # 카카오 REST 키 (지오코딩 + 알림토큰 갱신)
-KAKAO_REFRESH = os.environ.get("KAKAO_REFRESH_TOKEN", "")  # 카카오톡 알림용 (없으면 알림 생략)
+DATA_KEY  = os.environ.get("DATA_KEY", "")
+KAKAO_REST= os.environ.get("KAKAO_REST_KEY", "")
+KAKAO_REFRESH = os.environ.get("KAKAO_REFRESH_TOKEN", "")
 
 REGION_SD = os.environ.get("REGION_SD", "서울특별시")
 REGION_GU = os.environ.get("REGION_GU", "광진구")
@@ -19,7 +17,7 @@ REALDEAL_MONTHS = 6
 PRPT_DIV = "0007,0005,0006,0008"
 
 BASE = "https://apis.data.go.kr/B010003/OnbidRlstListSrvc2"
-OP_CANDIDATES = ["getRlstCltrList", "getRlstCltrList2"]
+OP_CANDIDATES = ["getRlstCltrList2"]
 RT = {"apt":"https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev",
       "rh": "https://apis.data.go.kr/1613000/RTMSDataSvcRHTrade/getRTMSDataSvcRHTrade",
       "silv":"https://apis.data.go.kr/1613000/RTMSDataSvcSilvTrade/getRTMSDataSvcSilvTrade"}
@@ -40,7 +38,6 @@ def http_get(url, headers=None, timeout=20):
     req = urllib.request.Request(url, headers=headers or {})
     return urllib.request.urlopen(req, timeout=timeout).read().decode("utf-8")
 
-# ---- 온비드 목록 (JSON) ----
 def onbid_url(op, page, minimal=False):
     params = {"serviceKey":DATA_KEY,"pageNo":page,"numOfRows":ROWS,"resultType":"json"}
     if not minimal:
@@ -51,8 +48,9 @@ def onbid_url(op, page, minimal=False):
 
 def json_items(raw, debug_label=""):
     d = json.loads(raw)
-    body = d.get("response",{}).get("body",{})
-    header = d.get("response",{}).get("header",{})
+    root = d.get("response", d)
+    body = root.get("body",{})
+    header = root.get("header",{})
     total = body.get("totalCount", "?")
     print(f"    [{debug_label}] resultCode={header.get('resultCode')} resultMsg={header.get('resultMsg')} totalCount={total}")
     it = body.get("items") or {}
@@ -61,13 +59,11 @@ def json_items(raw, debug_label=""):
 
 def fetch_list():
     for op in OP_CANDIDATES:
-        # 1차: 필터 포함 시도
         try:
             raw = http_get(onbid_url(op,1))
             its = json_items(raw, f"{op}/필터있음")
         except Exception as e:
             print(f"  ({op} 필터포함 실패: {e})"); its=[]
-        # 0건이면 필터(prptDivCd, pvctTrgtYn) 없이 지역만으로 재시도
         if not its:
             try:
                 raw2 = http_get(onbid_url(op,1,minimal=True))
@@ -88,7 +84,6 @@ def fetch_list():
         return out
     return []
 
-# ---- 카카오 지오코딩 ----
 def geocode(addr, cache):
     if addr in cache: return cache[addr]
     try:
@@ -99,7 +94,6 @@ def geocode(addr, cache):
     except Exception: c = None
     cache[addr] = c; time.sleep(0.1); return c
 
-# ---- 국토부 실거래 (XML) ----
 def ym_list(n):
     import datetime as dt
     b = dt.date.today().replace(day=1); out=[]
@@ -141,7 +135,7 @@ def match(name, area, idx, kind):
             if not best or d["ym"]>best["ym"]: best=d
     return best
 
-RESI = ("아파트","연립","다세대","빌라","단독","다가구")  # 주거용만
+RESI = ("아파트","연립","다세대","빌라","단독","다가구")
 def build(items):
     gc = json.load(open(fp("geocode_cache.json"),encoding="utf-8")) if os.path.exists(fp("geocode_cache.json")) else {}
     lawd = SEOUL_GU.get(REGION_GU)
@@ -152,7 +146,7 @@ def build(items):
         if REGION_GU not in (sgg or ""): continue
         use = " ".join([it.get("cltrUsgMclsCtgrNm",""), it.get("cltrUsgSclsCtgrNm","")])
         if "오피스텔" in use: continue
-        if not any(k in use for k in RESI): continue     # 주거용(아파트/빌라)만
+        if not any(k in use for k in RESI): continue
         name = it.get("onbidCltrNm","")
         coord = geocode(name, gc) or geocode(f"{sd} {sgg} {emd}", gc)
         if not coord: continue
@@ -177,14 +171,12 @@ def build(items):
     json.dump(gc, open(fp("geocode_cache.json"),"w",encoding="utf-8"), ensure_ascii=False, indent=1)
     return out
 
-# ---- 신규 매물 판별 ----
 def read_prev():
     try:
         s = open(fp("data.js"),encoding="utf-8").read()
         return json.loads(s[s.index("["):s.rindex("]")+1])
     except Exception: return []
 
-# ---- 카카오톡 나에게 보내기 ----
 def kakao_token():
     data = urllib.parse.urlencode({"grant_type":"refresh_token","client_id":KAKAO_REST,
         "refresh_token":KAKAO_REFRESH}).encode()
@@ -215,7 +207,7 @@ if __name__=="__main__":
     open(fp("data.js"),"w",encoding="utf-8").write("window.GONMAE = "+json.dumps(cur,ensure_ascii=False)+";")
     print(f"완료: {len(cur)}건 → data.js")
     new = [x for x in cur if x.get("id") and x["id"] not in prev_ids]
-    if prev_ids and new:   # 최초 실행(prev 없음) 땐 알림 안 함
+    if prev_ids and new:
         lines = [f"🏠 신규 공매 {len(new)}건 ({REGION_GU})"]
         for x in new[:8]:
             eok = (x["min"]/1e8) if x["min"] else 0
