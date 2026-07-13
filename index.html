@@ -10,7 +10,7 @@
 <script>const KAKAO_JS_KEY = "9a5c9457313bde76febd1abc9f4056cc";</script>
 <style>
 :root{--bg:#0F1216;--surface:#171C22;--surface2:#1E252D;--line:#2A333D;
-  --text:#E9EEF3;--muted:#8B98A5;--accent:#FFC24B;--good:#3ED598;--apt:#4C9DF7;--villa:#2FBF71;--etc:#8B98A5;--r:14px}
+  --text:#E9EEF3;--muted:#8B98A5;--accent:#FFC24B;--good:#3ED598;--apt:#4C9DF7;--villa:#2FBF71;--etc:#8B98A5;--warn:#FF7B72;--r:14px}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{margin:0;background:var(--bg);color:var(--text);
   font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Noto Sans KR",sans-serif;
@@ -39,6 +39,7 @@ main{padding:12px 12px 0}
 .tag{background:var(--surface2);border-radius:6px;padding:2px 6px;font-size:11px}
 .tag.apt{background:#24384A;color:#8FC7FF}
 .tag.villa{background:#1F3A2C;color:#7FE0AC}
+.tag.warn{background:#3A2226;color:#FF9E97;font-weight:700}
 .nm{font-size:15px;font-weight:700;margin:4px 0 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .addr{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .prices{display:flex;gap:10px;align-items:baseline;margin-top:6px}
@@ -209,7 +210,8 @@ function render(){
     <div class="card" data-i="${i}">
       ${d.thumb ? `<img class="thumb" src="${d.thumb}" loading="lazy" onerror="this.style.visibility='hidden'">` : '<div class="thumb"></div>'}
       <div class="info">
-        <div class="line1"><span class="tag ${d.type}">${d.use || TN[d.type]}</span><span>${d.gu}</span>
+        <div class="line1"><span class="tag ${d.type}">${d.use || TN[d.type]}</span>
+          ${d.share ? `<span class="tag warn">${d.share}</span>` : ''}<span>${d.gu}</span>
           ${d.fail ? `<span>· 유찰 ${d.fail}회</span>` : ''}${d.hh ? `<span>· ${d.hh}세대</span>` : ''}</div>
         <div class="nm">${d.name || d.addr}</div>
         <div class="addr">${d.addr}</div>
@@ -225,15 +227,27 @@ function render(){
 /* 온비드 물건 상세 딥링크 (ID 4종이 수집된 경우) */
 function onbidUrl(d){
   const o = d.on;
-  if(o && o.plnmNo && o.pbctNo && o.cltrNo && o.cltrHstrNo)
-    return `https://m.onbid.co.kr/mo/cta/cltr/baseInfo.do?plnmNo=${o.plnmNo}&pbctNo=${o.pbctNo}`
-         + `&pbctCdtnNo=${o.pbctCdtnNo || d.cd || ''}&cltrHstrNo=${o.cltrHstrNo}&cltrNo=${o.cltrNo}`
-         + `&scrnGrpCd=${o.scrnGrpCd || '0001'}`;
-  return null;
+  if(!(o && o.c && o.p && o.b && o.cd)) return null;
+  return `https://m.onbid.co.kr/op/cltrpbancinf/cltrdtl/CltrDtlController/mvmnCltrDtl.do`
+       + `?cltrScrnGrpCd=0001&cltrPrptDivCd=${o.dv || '0007'}`
+       + `&onbidCltrno=${o.c}&onbidPbancNo=${o.p}&pbctNo=${o.b}&pbctCdtnNo=${o.cd}`;
+}
+
+function naverUrl(d){
+  // 네이버 부동산 검색은 '국토부 단지목록에 등록된 단지명'만 결과가 나온다.
+  // → 단지 매칭에 성공한 아파트만 호가 검색으로 보내고,
+  //   나머지(빌라·기타·매칭실패)는 반드시 결과가 뜨는 네이버 지도 주소검색으로 보낸다.
+  if(d.kaptName)
+    return {t:'네이버 호가', u:`https://m.land.naver.com/search/result/${encodeURIComponent(d.kaptName)}`};
+  const addr = (d.addr || '')
+    .replace(/\s*외\s*\d+\s*필지/, '')
+    .split(/\s제?\s*[지B]?\d+\s*층/)[0].trim();
+  return {t:'네이버 지도', u:`https://map.naver.com/p/search/${encodeURIComponent(addr)}`};
 }
 
 function openSheet(d){
   const q = encodeURIComponent(d.name || d.addr);
+  const nv = naverUrl(d);
   const hist = d.hist || [], lad = d.ladder || [];
   const max = Math.max(...hist.map(h => h.amt), 1);
   const url = onbidUrl(d);
@@ -241,7 +255,9 @@ function openSheet(d){
       <dt>단지</dt><dd>${d.kaptName || d.name}</dd>
       <dt>세대수 / 동수</dt><dd style="color:var(--apt)">${d.hh}세대 / ${d.dong || '—'}개동</dd>
       <dt>사용승인일</dt><dd>${ymd(d.used)}</dd>
-      <dt>난방 / 복도</dt><dd style="font-weight:400;font-size:13px">${d.heat||'—'} / ${d.hall||'—'}</dd>`
+      <dt>난방 / 복도</dt><dd style="font-weight:400;font-size:13px">${d.heat||'—'} / ${d.hall||'—'}</dd>
+      ${d.park ? `<dt>주차</dt><dd>${d.park}대</dd>` : ''}
+      ${d.subway ? `<dt>지하철</dt><dd style="font-weight:400;font-size:13px">${d.subway}${d.subwayMin?` · ${d.subwayMin}`:''}</dd>` : ''}`
     : (d.type === 'apt' ? `<dt>세대수</dt><dd style="color:var(--muted);font-weight:400">단지 매칭 실패</dd>` : '');
   $('#sheetbody').innerHTML = `
     <div class="grip"></div>
@@ -255,7 +271,7 @@ function openSheet(d){
       <dt>실거래 평균 (2년)</dt><dd>${d.dealAvg ? eok(d.dealAvg) : '—'}</dd>
       <dt>차액</dt><dd style="color:${d.gap>0?'var(--good)':'var(--muted)'}">${d.gap>0 ? eok(d.gap) : '—'}</dd>
       <dt>건물 / 대지</dt><dd>${d.area||'—'}㎡ / ${d.land||'—'}㎡</dd>
-      <dt>구분</dt><dd>${TN[d.type]} · ${d.use||'—'}</dd>
+      <dt>구분</dt><dd>${TN[d.type]} · ${d.use||'—'}${d.share?` · <span style="color:var(--warn)">${d.share}</span>`:''}</dd>
       ${aptRows}
       <dt>회차 / 유찰</dt><dd>${d.round||'—'}회차 / ${d.fail||0}회</dd>
       <dt>입찰기간</dt><dd style="font-weight:400;font-size:13px">${dt(d.bgn)} ~ ${dt(d.end)}</dd>
@@ -267,7 +283,7 @@ function openSheet(d){
       ${url ? `<a href="${url}" target="_blank">온비드 물건보기</a>`
             : `<button id="copyId">물건번호 복사</button>`}
       <a href="https://map.kakao.com/link/map/${q},${d.lat},${d.lng}" target="_blank">카카오맵</a>
-      <a href="https://m.land.naver.com/search/result/${q}" target="_blank">네이버 부동산</a>
+      <a href="${nv.u}" target="_blank">${nv.t}</a>
     </div>
     ${lad.length > 1 ? `<h3>회차별 최저입찰가 (${lad.length}회차)</h3>
       <table><tr><th>회차</th><th>입찰마감</th><th>최저입찰가</th></tr>
@@ -295,7 +311,7 @@ function bubble(d){
   const hot = d.gap > 0 && d.deal && d.min && d.min < d.deal * 0.8;
   const el = document.createElement('div');
   el.className = 'pin ' + d.type + (hot ? ' hot' : '');
-  el.innerHTML = `<div class="bub">${(d.min/1e8).toFixed(1)}억</div>`;
+  el.innerHTML = `<div class="bub">${(d.min/1e8).toFixed(1)}억${d.share ? ' <b style="font-size:10px">지분</b>' : ''}</div>`;
   el.onclick = () => openSheet(d);
   return el;
 }
