@@ -25,6 +25,7 @@ h1 small{font-weight:400;color:var(--muted);font-size:12px}
 select,.chip,input{background:var(--surface2);color:var(--text);border:1px solid var(--line);
   border-radius:999px;padding:7px 12px;font-size:13px;white-space:nowrap;flex:0 0 auto}
 .chip.on{background:var(--accent);color:#101317;border-color:var(--accent);font-weight:700}
+.chip.warnon{background:var(--warn);color:#1A0E10;border-color:var(--warn);font-weight:700}
 #panel{display:none;padding:12px 14px 4px;border-bottom:1px solid var(--line);background:var(--surface)}
 #panel.on{display:block}
 .frow{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:13px}
@@ -33,6 +34,7 @@ select,.chip,input{background:var(--surface2);color:var(--text);border:1px solid
 main{padding:12px 12px 0}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
   padding:12px;margin-bottom:10px;display:flex;gap:12px;cursor:pointer}
+.card.share{border-color:#5A2E33}
 .thumb{width:74px;height:74px;border-radius:10px;object-fit:cover;background:var(--surface2);flex:0 0 auto}
 .info{flex:1;min-width:0}
 .line1{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
@@ -42,11 +44,15 @@ main{padding:12px 12px 0}
 .tag.warn{background:#3A2226;color:#FF9E97;font-weight:700}
 .nm{font-size:15px;font-weight:700;margin:4px 0 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .addr{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.prices{display:flex;gap:10px;align-items:baseline;margin-top:6px}
+.prices{display:flex;gap:10px;align-items:baseline;margin-top:6px;flex-wrap:wrap}
 .min{font-size:17px;font-weight:800}
 .aprs{font-size:12px;color:var(--muted)}
 .gaptxt{font-size:11px;color:var(--good);margin-top:5px}
 .gaptxt.none{color:var(--muted)}
+.warnbox{background:#2B1A1D;border:1px solid #5A2E33;border-radius:12px;padding:11px 12px;
+  font-size:13px;line-height:1.55;color:#FFC9C4;margin:14px 0 0}
+.warnbox b{color:#FF9E97}
+.warnbox small{display:block;color:#B98C8C;font-size:11px;margin-top:4px}
 #mapview{display:none;position:fixed;inset:0;bottom:calc(64px + env(safe-area-inset-bottom))}
 #map{width:100%;height:100%}
 body.mapmode #mapview{display:block}
@@ -59,10 +65,13 @@ body.mapmode header,body.mapmode main{display:none}
   white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.45);font-variant-numeric:tabular-nums}
 .pin .bub:after{content:"";position:absolute;left:50%;bottom:-5px;margin-left:-5px;
   border:5px solid transparent;border-top-color:inherit;border-bottom:0}
+.pin .bub i{font-style:normal;font-size:10px;opacity:.9;margin-left:3px;
+  background:rgba(0,0,0,.28);border-radius:4px;padding:1px 3px}
 .pin.apt .bub{background:var(--apt);border-top-color:var(--apt)}
 .pin.villa .bub{background:var(--villa);border-top-color:var(--villa)}
 .pin.etc .bub{background:#5A6672;border-top-color:#5A6672}
 .pin.hot .bub{background:var(--accent);color:#101317;border-top-color:var(--accent)}
+.pin.share .bub{background:var(--warn);color:#1A0E10;border-top-color:var(--warn)}
 nav{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;background:rgba(15,18,22,.96);
   backdrop-filter:blur(10px);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
 nav button{flex:1;background:none;border:0;color:var(--muted);padding:12px 0 14px;font-size:12px;font-weight:600}
@@ -107,6 +116,7 @@ tr.cur td{color:var(--accent);font-weight:700}
     <button class="chip on" data-t="apt">아파트</button>
     <button class="chip on" data-t="villa">빌라</button>
     <button class="chip on" data-t="etc">기타</button>
+    <button class="chip" id="fShare">지분 제외</button>
   </div>
 </header>
 
@@ -131,6 +141,9 @@ tr.cur td{color:var(--accent);font-weight:700}
     <input id="d1" type="number" inputmode="numeric" placeholder="최소"><span>% ~</span>
     <input id="d2" type="number" inputmode="numeric" placeholder="최대"><span>%</span>
   </div>
+  <div class="frow" style="color:var(--muted);font-size:11px;margin-bottom:6px">
+    ※ 전용면적은 지분물건의 경우 <b style="color:var(--warn)">전체 면적</b> 기준으로 걸러집니다.
+  </div>
   <div class="frow" style="justify-content:flex-end;gap:6px">
     <span id="fCnt" style="margin-right:auto;color:var(--muted);font-size:12px"></span>
     <button class="chip" id="fReset">초기화</button>
@@ -146,6 +159,7 @@ tr.cur td{color:var(--accent);font-weight:700}
     <button class="chip on" data-t="apt">아파트</button>
     <button class="chip on" data-t="villa">빌라</button>
     <button class="chip on" data-t="etc">기타</button>
+    <button class="chip" id="fShare2">지분 제외</button>
     <button class="chip" id="mapCnt" style="pointer-events:none"></button>
   </div>
   <div id="map"></div>
@@ -169,9 +183,19 @@ const dt  = s => s && String(s).length >= 12
   ? `${s.slice(0,4)}.${s.slice(4,6)}.${s.slice(6,8)} ${s.slice(8,10)}:${s.slice(10,12)}` : ymd(s);
 const TN = {apt:'아파트', villa:'빌라', etc:'기타'};
 
+/* ── 지분물건 헬퍼 ──────────────────────────────────────────────
+   d.share      "1/2"        (온비드 세부정보 면적정보 비고에서 추출)
+   d.shareRatio 0.5
+   d.fullArea   59.97        (전체 전용면적. d.area는 지분면적)
+   d.deal       실거래(1채 전체) / d.dealAdj 실거래 × 지분율
+   d.gap        dealAdj - 최저입찰가                              */
+const isShare = d => !!d.share;
+const effArea = d => +d.fullArea || +d.area || 0;      // 필터·비교는 전체면적 기준
+const adjDeal = d => d.dealAdj || d.deal || 0;
+
 const RANGE = ['p1','p2','v1','v2','a1','a2','f1','f2','d1','d2'];
 const blank = () => Object.fromEntries(RANGE.map(k => [k, null]));
-let state = {sort:'gap', gu:'', types:{apt:true, villa:true, etc:true}, ...blank()};
+let state = {sort:'gap', gu:'', types:{apt:true, villa:true, etc:true}, noShare:false, ...blank()};
 
 $('#meta').textContent = `${D.length}건 · ${window.GONMAE_AT || ''}`;
 [...new Set(D.map(d => d.gu))].sort().forEach(g => {
@@ -192,13 +216,22 @@ function filtered(){
   return D.filter(d => {
     if(state.gu && d.gu !== state.gu) return false;
     if(!state.types[d.type]) return false;
+    if(state.noShare && isShare(d)) return false;                 // 지분 제외
     if(!rng((d.min||0)/1e8,  state.p1, state.p2)) return false;   // 최저입찰가(억)
     if(!rng((d.aprs||0)/1e8, state.v1, state.v2)) return false;   // 감정가(억)
-    if(!rng(+d.area || 0,    state.a1, state.a2)) return false;   // 전용면적(㎡)
+    if(!rng(effArea(d),      state.a1, state.a2)) return false;   // 전용면적(㎡·전체기준)
     if(!rng(d.fail || 0,     state.f1, state.f2)) return false;   // 유찰횟수(회)
     if(!rng(d.disc || 0,     state.d1, state.d2)) return false;   // 감정가 대비(%)
     return true;
   }).sort(key);
+}
+
+function gapLine(d){
+  if(!(d.gap > 0)) return '<div class="gaptxt none">실거래 매칭 없음</div>';
+  const base = isShare(d)
+    ? `실거래 ${eok(d.deal)} × ${d.share} = ${eok(adjDeal(d))} 대비`
+    : `실거래 ${eok(d.deal)} 대비`;
+  return `<div class="gaptxt">${base} <b>${eok(d.gap)} 낮음</b></div>`;
 }
 
 function render(){
@@ -207,18 +240,19 @@ function render(){
   $('#fCnt').textContent = `조건 충족 ${rows.length}건`;
   if(!rows.length){ el.innerHTML = '<div class="empty">조건에 맞는 물건이 없습니다. 필터를 넓혀보세요.</div>'; }
   else el.innerHTML = rows.map((d,i) => `
-    <div class="card" data-i="${i}">
+    <div class="card ${isShare(d)?'share':''}" data-i="${i}">
       ${d.thumb ? `<img class="thumb" src="${d.thumb}" loading="lazy" onerror="this.style.visibility='hidden'">` : '<div class="thumb"></div>'}
       <div class="info">
         <div class="line1"><span class="tag ${d.type}">${d.use || TN[d.type]}</span>
-          ${d.share ? `<span class="tag warn">${d.share}</span>` : ''}<span>${d.gu}</span>
+          ${isShare(d) ? `<span class="tag warn">⚠ 지분 ${d.share}</span>` : ''}<span>${d.gu}</span>
           ${d.fail ? `<span>· 유찰 ${d.fail}회</span>` : ''}${d.hh ? `<span>· ${d.hh}세대</span>` : ''}</div>
         <div class="nm">${d.name || d.addr}</div>
         <div class="addr">${d.addr}</div>
         <div class="prices num"><span class="min">${eok(d.min)}</span>
           <span class="aprs">감정 ${eok(d.aprs)}${d.disc?` (${d.disc}%)`:''}</span>
-          <span class="addr">${d.area ? d.area+'㎡' : ''}</span></div>
-        <div class="gaptxt ${d.gap>0?'':'none'}">${d.gap>0 ? `실거래 ${eok(d.deal)} 대비 <b>${eok(d.gap)} 낮음</b>` : '실거래 매칭 없음'}</div>
+          <span class="addr">${d.area ? d.area+'㎡' : ''}${
+            isShare(d) && d.fullArea ? ` <span style="color:var(--warn)">/ 전체 ${d.fullArea}㎡</span>` : ''}</span></div>
+        ${gapLine(d)}
       </div></div>`).join('');
   el.querySelectorAll('.card').forEach(c => c.onclick = () => openSheet(rows[+c.dataset.i]));
   if(mapReady) drawPins();
@@ -234,9 +268,6 @@ function onbidUrl(d){
 }
 
 function naverUrl(d){
-  // 네이버 부동산 검색은 '국토부 단지목록에 등록된 단지명'만 결과가 나온다.
-  // → 단지 매칭에 성공한 아파트만 호가 검색으로 보내고,
-  //   나머지(빌라·기타·매칭실패)는 반드시 결과가 뜨는 네이버 지도 주소검색으로 보낸다.
   if(d.kaptName)
     return {t:'네이버 호가', u:`https://m.land.naver.com/search/result/${encodeURIComponent(d.kaptName)}`};
   const addr = (d.addr || '')
@@ -251,6 +282,18 @@ function openSheet(d){
   const hist = d.hist || [], lad = d.ladder || [];
   const max = Math.max(...hist.map(h => h.amt), 1);
   const url = onbidUrl(d);
+  const sh = isShare(d);
+
+  const shareBox = sh ? `
+    <div class="warnbox">
+      <b>⚠ 지분 물건 — 집 전체가 아니라 ${d.share} 지분만 매각됩니다.</b><br>
+      낙찰받아도 나머지 공유자와 <b>공유관계</b>가 되며, 단독 사용·처분이 불가능합니다.
+      (실무상 공유물분할청구소송 → 경매로 이어지는 경우가 많습니다.)
+      ${d.fullArea ? `<br>전용 <b>${d.fullArea}㎡</b> 중 <b>${d.area}㎡</b>(${d.share})가 매각 대상.` : ''}
+      ${d.shareRaw ? `<small>온비드 원문: ${d.shareRaw}</small>` : ''}
+      <small>아래 실거래·차액은 전체 거래가에 지분율(${d.share})을 곱해 환산한 값입니다.</small>
+    </div>` : '';
+
   const aptRows = d.hh ? `
       <dt>단지</dt><dd>${d.kaptName || d.name}</dd>
       <dt>세대수 / 동수</dt><dd style="color:var(--apt)">${d.hh}세대 / ${d.dong || '—'}개동</dd>
@@ -258,20 +301,26 @@ function openSheet(d){
       <dt>난방 / 복도</dt><dd style="font-weight:400;font-size:13px">${d.heat||'—'} / ${d.hall||'—'}</dd>
       ${d.park ? `<dt>주차</dt><dd>${d.park}대</dd>` : ''}
       ${d.subway ? `<dt>지하철</dt><dd style="font-weight:400;font-size:13px">${d.subway}${d.subwayMin?` · ${d.subwayMin}`:''}</dd>` : ''}`
-    : (d.type === 'apt' ? `<dt>세대수</dt><dd style="color:var(--muted);font-weight:400">단지 매칭 실패</dd>` : '');
+    : (d.type === 'apt' ? `<dt>세대수</dt><dd style="color:var(--muted);font-weight:400">K-apt 미등록 / 단지 매칭 실패</dd>` : '');
+
   $('#sheetbody').innerHTML = `
     <div class="grip"></div>
     ${d.thumb ? `<img class="hero" src="${d.thumb}" onerror="this.remove()">` : ''}
-    <h2 style="font-size:19px;margin:14px 0 4px">${d.name || d.addr}</h2>
+    <h2 style="font-size:19px;margin:14px 0 4px">${d.name || d.addr}${sh?` <span style="color:var(--warn);font-size:14px">· 지분 ${d.share}</span>`:''}</h2>
     <div style="font-size:13px;color:var(--muted)">${d.addr}</div>
+    ${shareBox}
     <dl class="kv num">
       <dt>최저입찰가 (현재 회차)</dt><dd style="color:var(--accent);font-size:17px">${eok(d.min)}</dd>
       <dt>감정가</dt><dd>${eok(d.aprs)} <span style="color:var(--muted)">(${d.disc||'—'}%)</span></dd>
-      <dt>최근 실거래</dt><dd>${d.deal ? eok(d.deal) : '매칭 없음'}</dd>
+      <dt>최근 실거래 ${sh?'(전체)':''}</dt><dd>${d.deal ? eok(d.deal) : '매칭 없음'}</dd>
+      ${sh && d.deal ? `<dt style="color:var(--warn)">지분 ${d.share} 환산</dt>
+        <dd style="color:var(--warn)">${eok(adjDeal(d))}</dd>` : ''}
       <dt>실거래 평균 (2년)</dt><dd>${d.dealAvg ? eok(d.dealAvg) : '—'}</dd>
-      <dt>차액</dt><dd style="color:${d.gap>0?'var(--good)':'var(--muted)'}">${d.gap>0 ? eok(d.gap) : '—'}</dd>
+      <dt>차액${sh?' (환산 기준)':''}</dt><dd style="color:${d.gap>0?'var(--good)':'var(--muted)'}">${d.gap>0 ? eok(d.gap) : '—'}</dd>
       <dt>건물 / 대지</dt><dd>${d.area||'—'}㎡ / ${d.land||'—'}㎡</dd>
-      <dt>구분</dt><dd>${TN[d.type]} · ${d.use||'—'}${d.share?` · <span style="color:var(--warn)">${d.share}</span>`:''}</dd>
+      ${sh && d.fullArea ? `<dt style="color:var(--warn)">전체 전용면적</dt>
+        <dd style="color:var(--warn)">${d.fullArea}㎡ 중 ${d.share}</dd>` : ''}
+      <dt>구분</dt><dd>${TN[d.type]} · ${d.use||'—'}</dd>
       ${aptRows}
       <dt>회차 / 유찰</dt><dd>${d.round||'—'}회차 / ${d.fail||0}회</dd>
       <dt>입찰기간</dt><dd style="font-weight:400;font-size:13px">${dt(d.bgn)} ~ ${dt(d.end)}</dd>
@@ -289,7 +338,7 @@ function openSheet(d){
       <table><tr><th>회차</th><th>입찰마감</th><th>최저입찰가</th></tr>
       ${lad.map(l => `<tr class="num ${l.end===d.end?'cur':''}"><td>${l.rd||'—'}</td>
         <td>${dt(l.end)}</td><td>${eok(l.min)}</td></tr>`).join('')}</table>` : ''}
-    <h3>이 번지의 실거래 ${hist.length ? `(${hist.length}건 / 최근 2년)` : ''}</h3>
+    <h3>이 번지의 실거래 ${hist.length ? `(${hist.length}건 / 최근 2년${sh?' · 전체 1채 기준':''})` : ''}</h3>
     ${hist.length ? `<table><tr><th>거래월</th><th>층</th><th>전용</th><th>거래가</th><th></th></tr>
       ${hist.map(h => `<tr class="num"><td>${h.ym.slice(0,4)}.${h.ym.slice(4)}</td><td>${h.fl||'—'}</td>
         <td>${h.area||'—'}</td><td>${eok(h.amt)}</td>
@@ -305,13 +354,14 @@ function openSheet(d){
 }
 $('#sheet').onclick = e => { if(e.target.id === 'sheet') $('#sheet').classList.remove('on'); };
 
-/* ── 지도: 네이버 부동산처럼 가격 말풍선 마커 ── */
+/* ── 지도: 가격 말풍선 마커 ── */
 let map, mapReady = false, pins = [];
 function bubble(d){
-  const hot = d.gap > 0 && d.deal && d.min && d.min < d.deal * 0.8;
+  const sh = isShare(d);
+  const hot = !sh && d.gap > 0 && adjDeal(d) && d.min && d.min < adjDeal(d) * 0.8;
   const el = document.createElement('div');
-  el.className = 'pin ' + d.type + (hot ? ' hot' : '');
-  el.innerHTML = `<div class="bub">${(d.min/1e8).toFixed(1)}억${d.share ? ' <b style="font-size:10px">지분</b>' : ''}</div>`;
+  el.className = 'pin ' + d.type + (sh ? ' share' : hot ? ' hot' : '');
+  el.innerHTML = `<div class="bub">${(d.min/1e8).toFixed(1)}억${sh ? `<i>지분 ${d.share}</i>` : ''}</div>`;
   el.onclick = () => openSheet(d);
   return el;
 }
@@ -357,16 +407,20 @@ $('#tabList').onclick = () => {
 function syncUI(){
   $('#gu').value = $('#gu2').value = state.gu;
   $$('[data-t]').forEach(c => c.classList.toggle('on', state.types[c.dataset.t]));
+  ['#fShare','#fShare2'].forEach(s => $(s).classList.toggle('warnon', state.noShare));
 }
 $('#fBtn').onclick   = () => $('#panel').classList.toggle('on');
 $('#fClose').onclick = () => $('#panel').classList.remove('on');
 $('#fReset').onclick = () => {
-  state = {...state, gu:'', types:{apt:true,villa:true,etc:true}, ...blank()};
+  state = {...state, gu:'', types:{apt:true,villa:true,etc:true}, noShare:false, ...blank()};
   RANGE.forEach(k => $('#'+k).value = '');
   syncUI(); render();
 };
 $('#sort').onchange = e => { state.sort = e.target.value; render(); };
 ['#gu','#gu2'].forEach(sel => $(sel).onchange = e => { state.gu = e.target.value; syncUI(); render(); });
+['#fShare','#fShare2'].forEach(sel => $(sel).onclick = () => {
+  state.noShare = !state.noShare; syncUI(); render();
+});
 $$('[data-t]').forEach(c => c.onclick = () => {
   state.types[c.dataset.t] = !state.types[c.dataset.t]; syncUI(); render();
 });
