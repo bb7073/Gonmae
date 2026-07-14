@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 공매(온비드) 수집 → data.js + 신규매물 카카오톡 알림
-v9: ★현재 회차 선택(회차 사다리 보존) / 아파트 재분류 / 온비드 딥링크 ID / 가격컷 제거
+v10: ★지분물건 판별(상세 API 면적정보 '비고' 파싱 + 실거래가 지분보정)
+     ★세대수 매칭 강화(실거래 단지명 사용 + 시군구 단지목록 폴백 + 실패로그)
 """
 import json, os, re, sys, time, urllib.parse, urllib.request, urllib.error
 import xml.etree.ElementTree as ET
@@ -16,20 +17,18 @@ KAKAO_REST    = os.environ.get("KAKAO_REST_KEY", "").strip()
 KAKAO_REFRESH = os.environ.get("KAKAO_REFRESH_TOKEN", "").strip()
 ONLY_GU       = os.environ.get("ONLY_GU", "").strip()
 FORCE_NOTIFY  = os.environ.get("FORCE_NOTIFY", "") == "1"
+DEBUG_MNG     = os.environ.get("DEBUG_MNG", "").strip()   # 예: 2026-01663-001 → 상세 응답 원문 통째 출력
 
 REGION_SD       = "서울특별시"
 MAX_PAGES, ROWS = 10, 100
 REALDEAL_MONTHS = 24
 PRPT_DIV        = "0007,0005,0006,0008"
-MIN_AREA        = 25.0          # 전용 25㎡ 미만은 수집 안 함 (그 위 크기·가격은 앱에서 필터)
+MIN_AREA        = 25.0          # ★지분물건은 '전체면적' 기준으로 판정 (지분면적으로 자르지 않음)
 PAGE_URL        = "https://bb7073.github.io/Gonmae/"
 
 BASE = "https://apis.data.go.kr/B010003/OnbidRlstListSrvc2"
 OP   = "getRlstCltrList2"
-DTL_BASE = "https://apis.data.go.kr/B010003/OnbidRlstDtlSrvc2"   # 부동산 물건상세 조회 (승인 2026-07-09)
-# 포털에 오퍼레이션ID가 한글명으로만 표시돼 후보를 순차 시도한다.
-# 정확한 ID를 알면 Actions env DTL_OP=... 로 넣으면 추측 없이 그것만 쓴다.
-# 오퍼레이션 ID 확정(포털 미리보기로 확인, 2026-07-14): getRlstDtlInf2
+DTL_BASE = "https://apis.data.go.kr/B010003/OnbidRlstDtlSrvc2"
 DTL_OPS  = [os.environ.get("DTL_OP", "").strip()] if os.environ.get("DTL_OP", "").strip() else ["getRlstDtlInf2"]
 KAKAO_ADDR = "https://dapi.kakao.com/v2/local/search/address.json?query="
 KAKAO_KW   = "https://dapi.kakao.com/v2/local/search/keyword.json?query="
@@ -37,10 +36,11 @@ RT = {"apt":"https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataS
       "rh": "https://apis.data.go.kr/1613000/RTMSDataSvcRHTrade/getRTMSDataSvcRHTrade",
       "silv":"https://apis.data.go.kr/1613000/RTMSDataSvcSilvTrade/getRTMSDataSvcSilvTrade"}
 APT_LIST_BASE  = "https://apis.data.go.kr/1613000/AptListService3"
-APT_LIST_OPS   = ["getLegaldongAptList3"]        # 확인됨(2026-07-14), 응답=JSON
+APT_LIST_OPS   = ["getLegaldongAptList3"]                     # 확인됨(2026-07-14)
+APT_SGG_OPS    = ["getSigunguAptList3", "getSigunguAptList"]  # ★구 단위 폴백(후보 순차 시도)
 APT_BASIS_BASE = "https://apis.data.go.kr/1613000/AptBasisInfoServiceV4"
-APT_BASIS_OPS  = ["getAphusBassInfoV4"]           # 확인됨, 응답=JSON (kaptdaCnt=세대수)
-APT_DTL_OP     = "getAphusDtlInfoV4"             # 주차대수·지하철 등 부가정보
+APT_BASIS_OPS  = ["getAphusBassInfoV4"]                       # kaptdaCnt = 세대수
+APT_DTL_OP     = "getAphusDtlInfoV4"
 
 SEOUL_GU = {"종로구":"11110","중구":"11140","용산구":"11170","성동구":"11200","광진구":"11215",
 "동대문구":"11230","중랑구":"11260","성북구":"11290","강북구":"11305","도봉구":"11320",
@@ -63,8 +63,6 @@ def xml_items(raw):
     return [{c.tag: (c.text or "").strip() for c in it} for it in ET.fromstring(raw).findall(".//item")]
 
 def api_items(raw):
-    """공공데이터 응답에서 item 리스트를 꺼낸다. JSON/XML 둘 다 처리.
-       AptListService3·AptBasisInfoServiceV4는 JSON을 준다(items=배열, item=객체)."""
     raw = (raw or "").strip()
     if raw.startswith("{"):
         d = json.loads(raw)
@@ -79,23 +77,61 @@ def g(d, *keys):
         if d.get(k): return d[k]
     return ""
 def gi(d, *keys):
-    """대소문자·언더스코어 무시 키 조회 (API가 필드명을 바꿔도 견디게)"""
     low = {re.sub(r"[^a-z0-9]", "", str(k).lower()): v for k, v in d.items()}
     for k in keys:
         v = low.get(re.sub(r"[^a-z0-9]", "", k.lower()))
         if v: return v
     return ""
 def nrm(s): return re.sub(r"[\s\(\)0-9\-]|아파트|주상복합", "", s or "")
-
-def share_of(name):
-    """물건명에 박혀있는 지분 표기 추출: '지분 1/2', '(1/2 지분)', '지분매각' 등"""
-    t = name or ""
-    m = re.search(r"(\d+\s*/\s*\d+)", t)
-    if "지분" in t or m:
-        frac = m.group(1).replace(" ", "") if m else ""
-        return f"지분 {frac}".strip() if ("지분" in t or frac) else ""
-    return ""
 def now_kst(): return time.strftime("%Y%m%d%H%M", time.gmtime(time.time() + 9 * 3600))
+
+# ── ★지분 파싱 ────────────────────────────────────────────────────────────
+# 온비드 세부정보 '면적정보'의 비고 문구:
+#   건물(건물) 29.985㎡ / 비고 "지분(총면적 59.97 2분의1 지분)"          ← 이게 진짜 지분매각
+#   토지(대)  10.37㎡  / 비고 "지분(총면적 28,587.8 28587.8분의 10.37 지분)"  ← 대지권 비율(일반물건에도 있음)
+# 상세 API의 필드명을 모르므로 응답 안의 모든 문자열을 훑되,
+# '총면적 × 지분율 ≈ 온비드 건물면적(bldSqms)'을 만족하는 것만 채택 → 토지행과 자동 분리된다.
+FRAC_RE = re.compile(r"([\d,]+(?:\.\d+)?)\s*분\s*의\s*([\d,]+(?:\.\d+)?)")
+TOT_RE  = re.compile(r"총\s*면적\s*([\d,]+(?:\.\d+)?)")
+
+def _f(s):
+    try: return float(str(s).replace(",", ""))
+    except Exception: return None
+def _fmt(x):
+    return str(int(x)) if abs(x - int(x)) < 1e-9 else f"{x:g}"
+def _strings(o):
+    if isinstance(o, dict):
+        for v in o.values(): yield from _strings(v)
+    elif isinstance(o, list):
+        for v in o: yield from _strings(v)
+    elif isinstance(o, str):
+        yield o
+
+def parse_share(detail, bld_area):
+    """{'ratio':0.5,'full':59.97,'txt':'1/2','raw':...} 또는 None"""
+    if not detail: return None
+    for s in _strings(detail):
+        if "분의" not in s: continue
+        mf = FRAC_RE.search(s)
+        if not mf: continue
+        den, nume = _f(mf.group(1)), _f(mf.group(2))
+        if not den or not nume or den <= 0: continue
+        ratio = nume / den
+        if ratio >= 0.999: continue
+        mt  = TOT_RE.search(s)
+        tot = _f(mt.group(1)) if mt else None
+        if not (tot and bld_area): continue
+        if abs(tot * ratio - bld_area) > max(0.5, bld_area * 0.05): continue   # 건물행 검증
+        return {"ratio": round(ratio, 6), "full": tot,
+                "txt": f"{_fmt(nume)}/{_fmt(den)}", "raw": s.strip()[:80]}
+    return None
+
+def share_from_name(name):
+    t = name or ""
+    if "지분" not in t: return None
+    m = re.search(r"(\d+)\s*/\s*(\d+)", t)
+    return {"ratio": (int(m.group(1)) / int(m.group(2))) if m else None,
+            "full": None, "txt": (f"{m.group(1)}/{m.group(2)}" if m else "지분"), "raw": "물건명 표기"}
 
 # ── 카카오 셀프테스트 ─────────────────────────────────────────────────────
 def kakao_selftest():
@@ -128,17 +164,13 @@ def fetch_list(gu):
         if not it: break
         if not _LIST_DUMPED["x"]:
             _LIST_DUMPED["x"] = True
-            print("  [목록필드] " + json.dumps(it[0], ensure_ascii=False)[:2000])
+            print("  [목록필드] " + json.dumps(it[0], ensure_ascii=False)[:1200])
         out += it
         if len(it) < ROWS: break
         time.sleep(0.15)
     return out
 
-# ── ★회차 처리 ───────────────────────────────────────────────────────────
-# 목록 API는 한 물건을 '회차별로 여러 행'으로 준다(1회차 100% → 마지막 회차 10%).
-# 예전 코드는 그 중 '가장 싼 행'을 골라서 마지막 회차 가격/마감일이 찍혔다.
-# → 지금 입찰 가능한(마감이 아직 안 지난) 회차 중 가장 임박한 것을 채택하고,
-#   나머지 회차는 ladder(가격 사다리)로 보존해 상세화면에 보여준다.
+# ── 회차 처리 ────────────────────────────────────────────────────────────
 def _end(it): return re.sub(r"\D", "", gi(it, "cltrBidEndDt", "pbctBidEndDt", "bidEndDt", "bidClsgDt") or "")[:12]
 def _bgn(it): return re.sub(r"\D", "", gi(it, "cltrBidBgngDt", "cltrBidBgnDt", "pbctBidBgngDt", "bidBgngDt") or "")[:12]
 
@@ -169,7 +201,6 @@ def parse_addr(full):
     return (f"{m.group(1)} {m.group(2)} {m.group(3)} {m.group(4)}", bldg, m.group(3), m.group(4))
 
 def geocode(jibun_addr, bldg, cache):
-    """[경도, 위도, 법정동코드10]. 법정동코드는 단지정보 조회(PNU 대체용)로 쓴다."""
     for q in [jibun_addr, f"{jibun_addr} {bldg}".strip()]:
         if not q: continue
         if cache.get(q): return cache[q]
@@ -180,62 +211,47 @@ def geocode(jibun_addr, bldg, cache):
                 if docs:
                     d0 = docs[0]
                     ad = d0.get("address") or d0.get("road_address") or {}
-                    bcode = (ad.get("b_code") or "")[:10]
-                    c = [float(d0["x"]), float(d0["y"]), bcode]
+                    c = [float(d0["x"]), float(d0["y"]), (ad.get("b_code") or "")[:10]]
                     cache[q] = c; return c
             except Exception: pass
             time.sleep(0.05)
     return None
 
-# ── 온비드 상세(딥링크용 ID) ──────────────────────────────────────────────
-_DTL_OP, _DUMPED = {"op": None}, {"x": False}
-
-_DTL_ERR = {"n": 0}
+# ── 온비드 상세 ──────────────────────────────────────────────────────────
+_DTL_OP, _DUMPED, _DTL_ERR = {"op": None}, {"x": False}, {"n": 0}
 
 def fetch_detail(mng, cdtn):
-    if not (mng and cdtn):
-        if _DTL_ERR["n"] < 1:
-            _DTL_ERR["n"] += 1
-            print(f"  [상세] 키 부족 → 호출 생략 (cltrMngNo={mng!r}, pbctCdtnNo={cdtn!r})")
-        return {}
-    if _DTL_ERR["n"] >= 10 and not _DTL_OP["op"]:
-        return {}                      # 후보 전멸 → 상세 API 호출 중단
-    ops = [_DTL_OP["op"]] if _DTL_OP["op"] else DTL_OPS
-    for op in ops:
-        q = urllib.parse.urlencode({"serviceKey": DATA_KEY, "cltrMngNo": mng, "pbctCdtnNo": cdtn,
-                                    "resultType": "json", "numOfRows": 10, "pageNo": 1}, safe="=")
+    """지분·면적 확인용. 응답 JSON 통째로 반환(필드명 의존 없이 문자열 스캔)."""
+    if not mng: return {}
+    if _DTL_ERR["n"] >= 10 and not _DTL_OP["op"]: return {}
+    for op in ([_DTL_OP["op"]] if _DTL_OP["op"] else DTL_OPS):
+        prm = {"serviceKey": DATA_KEY, "cltrMngNo": mng, "resultType": "json",
+               "numOfRows": 50, "pageNo": 1}
+        if cdtn: prm["pbctCdtnNo"] = cdtn
         try:
-            raw = http_get(f"{DTL_BASE}/{op}?{q}")
-            d = json.loads(raw)
+            d = json.loads(http_get(f"{DTL_BASE}/{op}?{urllib.parse.urlencode(prm, safe='=')}"))
         except Exception as e:
-            if _DTL_ERR["n"] < 10:
+            if _DTL_ERR["n"] < 5:
                 _DTL_ERR["n"] += 1
-                body = e.read().decode("utf-8", "ignore")[:180] if hasattr(e, "read") else str(e)[:180]
+                body = e.read().decode("utf-8", "ignore")[:160] if hasattr(e, "read") else str(e)[:160]
                 print(f"  [상세] {op} 실패: {body}")
             continue
-        if isinstance(d.get("result"), dict):          # {"result":{"resultCode":"03",...}}
+        if isinstance(d.get("result"), dict) and str(d["result"].get("resultCode", "00")) not in ("00", "0"):
             if _DTL_ERR["n"] < 3:
                 _DTL_ERR["n"] += 1
-                print(f"  [상세] {op} 응답: {json.dumps(d['result'], ensure_ascii=False)[:120]} "
-                      f"(cltrMngNo={mng}, pbctCdtnNo={cdtn})")
+                print(f"  [상세] {op} 응답: {json.dumps(d['result'], ensure_ascii=False)[:120]} ({mng})")
             continue
-        body = d.get("response", d).get("body", {})
-        it = body.get("items") or {}
-        it = it.get("item", []) if isinstance(it, dict) else it
-        if isinstance(it, dict): it = [it]
-        if not it: continue
         if not _DTL_OP["op"]:
             _DTL_OP["op"] = op; print(f"  [상세] 오퍼레이션 '{op}' 사용")
-        if not _DUMPED["x"]:
+        if DEBUG_MNG and mng == DEBUG_MNG:
+            print(f"  [상세원문 {mng}] " + json.dumps(d, ensure_ascii=False)[:4000])
+        elif not _DUMPED["x"]:
             _DUMPED["x"] = True
-            print("  [상세필드] " + json.dumps(it[0], ensure_ascii=False)[:1500])
-        return it[0]
+            print("  [상세필드] " + json.dumps(d, ensure_ascii=False)[:1200])
+        return d
     return {}
 
 def onbid_ids(it, cdtn):
-    """차세대 온비드 물건상세 URL 파라미터 — 전부 목록 API 안에 있다.
-       .../CltrDtlController/mvmnCltrDtl.do?cltrScrnGrpCd=0001&cltrPrptDivCd=0007
-         &onbidCltrno=..&onbidPbancNo=..&pbctNo=..&pbctCdtnNo=.."""
     o = {"c":  str(gi(it, "onbidCltrno", "cltrNo") or ""),
          "p":  str(gi(it, "onbidPbancNo", "plnmNo", "pbancNo") or ""),
          "b":  str(gi(it, "pbctNo") or ""),
@@ -244,54 +260,73 @@ def onbid_ids(it, cdtn):
     return o if (o["c"] and o["p"] and o["b"] and o["cd"]) else {}
 
 # ── 아파트 단지정보 ───────────────────────────────────────────────────────
-_APT_LIST_OP, _APT_BASIS_OP = {"op": None}, {"op": None}
-_BJD_CACHE, _KAPT_CACHE = {}, {}
-_APT_ERR, _APT_BERR = {"x": False}, {"x": False}
+_APT_LIST_OP, _APT_SGG_OP, _APT_BASIS_OP = {"op": None}, {"op": None}, {"op": None}
+_BJD_CACHE, _SGG_CACHE, _KAPT_CACHE = {}, {}, {}
+_APT_ERR, _APT_SERR, _APT_BERR = {"x": False}, {"x": False}, {"x": False}
+_MATCH_STAT = {"try": 0, "hit": 0, "viaSgg": 0, "nobjd": 0}
+_MISS_LOG = {"n": 0}
+
+def _pairs(its):
+    return [(g(it, "kaptCode", "kaptcode"), g(it, "kaptName", "kaptname")) for it in its]
 
 def apt_list_by_bjd(bjd):
     if bjd in _BJD_CACHE: return _BJD_CACHE[bjd]
-    ops = [_APT_LIST_OP["op"]] if _APT_LIST_OP["op"] else APT_LIST_OPS
     res = []
-    for op in ops:
+    for op in ([_APT_LIST_OP["op"]] if _APT_LIST_OP["op"] else APT_LIST_OPS):
         q = urllib.parse.urlencode({"serviceKey": DATA_KEY, "bjdCode": bjd,
-                                    "numOfRows": 200, "pageNo": 1}, safe="=")
+                                    "numOfRows": 500, "pageNo": 1}, safe="=")
         try:
-            raw = http_get(f"{APT_LIST_BASE}/{op}?{q}")
-            its = api_items(raw)
-            if not its and not _APT_ERR["x"]:
-                _APT_ERR["x"] = True
-                print(f"  [단지목록] {op} 응답 비어있음: {raw[:220]}")
+            its = api_items(http_get(f"{APT_LIST_BASE}/{op}?{q}"))
         except Exception as e:
             if not _APT_ERR["x"]:
                 _APT_ERR["x"] = True
-                body = e.read().decode("utf-8", "ignore")[:220] if hasattr(e, "read") else str(e)[:220]
-                print(f"  [단지목록] {op} 실패: {body}")
+                body = e.read().decode("utf-8", "ignore")[:200] if hasattr(e, "read") else str(e)[:200]
+                print(f"  [단지목록/동] {op} 실패: {body}")
             continue
-        if its or _APT_LIST_OP["op"]:
-            if not _APT_LIST_OP["op"]:
-                _APT_LIST_OP["op"] = op; print(f"  [단지목록] 오퍼레이션 '{op}' 사용")
-            res = [(g(it, "kaptCode", "kaptcode"), g(it, "kaptName", "kaptname")) for it in its]
-            break
+        if not _APT_LIST_OP["op"] and its:
+            _APT_LIST_OP["op"] = op; print(f"  [단지목록/동] 오퍼레이션 '{op}' 사용")
+        res = _pairs(its); break
     _BJD_CACHE[bjd] = res
+    time.sleep(0.05)
+    return res
+
+def apt_list_by_sgg(sgg):
+    """★법정동 목록이 비거나 매칭 실패할 때 쓰는 구(區) 전체 단지목록. 구별 1회만 조회."""
+    if sgg in _SGG_CACHE: return _SGG_CACHE[sgg]
+    res = []
+    for op in ([_APT_SGG_OP["op"]] if _APT_SGG_OP["op"] else APT_SGG_OPS):
+        q = urllib.parse.urlencode({"serviceKey": DATA_KEY, "sigunguCode": sgg,
+                                    "numOfRows": 2000, "pageNo": 1}, safe="=")
+        try:
+            its = api_items(http_get(f"{APT_LIST_BASE}/{op}?{q}"))
+        except Exception as e:
+            if not _APT_SERR["x"]:
+                _APT_SERR["x"] = True
+                body = e.read().decode("utf-8", "ignore")[:200] if hasattr(e, "read") else str(e)[:200]
+                print(f"  [단지목록/구] {op} 실패: {body}")
+            continue
+        if its:
+            if not _APT_SGG_OP["op"]:
+                _APT_SGG_OP["op"] = op
+                print(f"  [단지목록/구] 오퍼레이션 '{op}' 사용 — {sgg} {len(its)}단지")
+            res = _pairs(its); break
+    _SGG_CACHE[sgg] = res
     time.sleep(0.05)
     return res
 
 def apt_basis(kapt):
     if kapt in _KAPT_CACHE: return _KAPT_CACHE[kapt]
-    ops = [_APT_BASIS_OP["op"]] if _APT_BASIS_OP["op"] else APT_BASIS_OPS
     info = {}
-    for op in ops:
+    for op in ([_APT_BASIS_OP["op"]] if _APT_BASIS_OP["op"] else APT_BASIS_OPS):
         q = urllib.parse.urlencode({"serviceKey": DATA_KEY, "kaptCode": kapt}, safe="=")
         try:
-            raw = http_get(f"{APT_BASIS_BASE}/{op}?{q}")
-            its = api_items(raw)
+            its = api_items(http_get(f"{APT_BASIS_BASE}/{op}?{q}"))
             if not its and not _APT_BERR["x"]:
-                _APT_BERR["x"] = True
-                print(f"  [단지정보] {op} 응답 비어있음: {raw[:220]}")
+                _APT_BERR["x"] = True; print(f"  [단지정보] {op} 응답 비어있음")
         except Exception as e:
             if not _APT_BERR["x"]:
                 _APT_BERR["x"] = True
-                body = e.read().decode("utf-8", "ignore")[:220] if hasattr(e, "read") else str(e)[:220]
+                body = e.read().decode("utf-8", "ignore")[:200] if hasattr(e, "read") else str(e)[:200]
                 print(f"  [단지정보] {op} 실패: {body}")
             continue
         if its:
@@ -302,7 +337,7 @@ def apt_basis(kapt):
                     "used": gi(it, "kaptUsedate"), "heat": gi(it, "codeHeatNm"),
                     "hall": gi(it, "codeHallNm"), "kaptName": gi(it, "kaptName"),
                     "top": num(gi(it, "kaptTopFloor")) or None}
-            try:                                   # 부가정보(주차대수·지하철) — 실패해도 무시
+            try:
                 q2 = urllib.parse.urlencode({"serviceKey": DATA_KEY, "kaptCode": kapt}, safe="=")
                 d2 = api_items(http_get(f"{APT_BASIS_BASE}/{APT_DTL_OP}?{q2}"))
                 if d2:
@@ -316,28 +351,45 @@ def apt_basis(kapt):
     time.sleep(0.05)
     return info
 
-_MATCH_STAT = {"try": 0, "hit": 0, "nobjd": 0}
+def _keys(bldg, names):
+    """매칭 후보키: 물건명에서 뽑은 건물명 + ★실거래에 잡힌 단지명(같은 지번)"""
+    out = []
+    for s in [bldg] + list(names or []):
+        if not s: continue
+        base = re.sub(r"\s*제?\s*[0-9A-Za-z가-힣]{0,4}동\s*$", "", str(s)).strip()
+        for k in (nrm(base), nrm(s)):
+            if k and len(k) >= 2 and k not in out: out.append(k)
+    return out
 
-def apt_info(pnu, bjd, bldg):
-    """공동주택 단지목록에 이름이 잡히면 = 아파트로 확정(+세대수·동수·사용승인일).
-       - 법정동코드: 온비드 PNU 앞10자리 → 없으면 카카오 지오코딩의 b_code 사용
-       - 이름: '제105동', '제씨동', '아파트' 같은 꼬리표를 떼고 부분일치
-       온비드 용도가 '기타주거용건물'로 잘못 찍힌 아파트(예: 여의도자이)도 여기서 구제된다."""
+def _match(pool, keys):
+    for kcode, name in pool:
+        n = nrm(name)
+        if not n or len(n) < 2: continue
+        for k in keys:
+            if n == k or n in k or k in n: return kcode
+    return None
+
+def apt_info(pnu, bjd, lawd, bldg, names, apt_use):
     code10 = (pnu or "")[:10] if pnu and len(pnu) >= 10 else (bjd or "")
-    if not bldg: return {}
+    keys = _keys(bldg, names)
+    if not keys: return {}
+    _MATCH_STAT["try"] += 1
     if not code10 or len(code10) < 10:
         _MATCH_STAT["nobjd"] += 1
+        pool = []
+    else:
+        pool = apt_list_by_bjd(code10)
+    kcode = _match(pool, keys)
+    if not kcode:                                    # ★구 전체 목록으로 재시도
+        kcode = _match(apt_list_by_sgg(lawd), keys)
+        if kcode: _MATCH_STAT["viaSgg"] += 1
+    if not kcode:
+        if apt_use and _MISS_LOG["n"] < 10:
+            _MISS_LOG["n"] += 1
+            print(f"  [단지매칭 실패] 키={keys} 법정동={code10} 동목록후보={[n for _, n in pool][:6]}")
         return {}
-    base = re.sub(r"\s*제?\s*[0-9A-Za-z가-힣]{0,4}동\s*$", "", bldg).strip()  # 제105동/제씨동 제거
-    key = nrm(base) or nrm(bldg)
-    if not key: return {}
-    _MATCH_STAT["try"] += 1
-    for kcode, name in apt_list_by_bjd(code10):
-        n = nrm(name)
-        if n and (n in key or key in n):
-            _MATCH_STAT["hit"] += 1
-            return apt_basis(kcode)
-    return {}
+    _MATCH_STAT["hit"] += 1
+    return apt_basis(kcode)
 
 # ── 실거래 ────────────────────────────────────────────────────────────────
 def ym_list(n):
@@ -374,6 +426,12 @@ def load_deals(lawd):
     _DEAL[lawd] = (by_jb, by_nm)
     return _DEAL[lawd]
 
+def deal_names(lawd, umd, jibun):
+    """★같은 지번의 실거래에 찍힌 단지명 — 단지매칭 키로 재활용"""
+    if not (umd and jibun): return []
+    by_jb, _ = load_deals(lawd)
+    return list({r["name"] for r in by_jb.get((umd, jibun), []) if r["name"]})
+
 def deal_history(lawd, umd, jibun, bldg, area):
     by_jb, by_nm = load_deals(lawd)
     recs = list(by_jb.get((umd, jibun), []))
@@ -386,7 +444,7 @@ def deal_history(lawd, umd, jibun, bldg, area):
 
 # ── 가공 ─────────────────────────────────────────────────────────────────
 RESI  = ("아파트", "연립", "다세대", "빌라", "단독", "다가구", "도시형생활주택", "주거용")
-VILLA = ("다세대", "다가구", "단독")     # ★사용자 정의: 이 셋만 빌라
+VILLA = ("다세대", "다가구", "단독")
 
 def _process_one(pack, gu, lawd, gc):
     it, ladder = pack
@@ -395,8 +453,14 @@ def _process_one(pack, gu, lawd, gc):
     if "오피스텔" in use: return "skip", None
     if not any(k in use for k in RESI): return "skip", None
 
-    area = fnum(gi(it, "bldSqms"))
-    if area is not None and area < MIN_AREA: return "resi", None
+    area = fnum(gi(it, "bldSqms"))          # ★지분물건이면 이 값은 '지분면적'이다
+    mng, cdtn = gi(it, "cltrMngNo"), gi(it, "pbctCdtnNo")
+
+    sh = parse_share(fetch_detail(mng, cdtn), area) or share_from_name(full)
+    ratio = (sh or {}).get("ratio")
+    farea = (sh or {}).get("full") or (round(area / ratio, 2) if (area and ratio) else area)
+
+    if farea is not None and farea < MIN_AREA: return "resi", None   # 전체면적 기준 컷
 
     minp = num(gi(it, "lowstBidPrcIndctCont", "lowstBidPrc", "minBidPrc"))
     aprs = num(gi(it, "apslEvlAmt"))
@@ -406,32 +470,40 @@ def _process_one(pack, gu, lawd, gc):
     if not coord: return "area", None
     bjd = coord[2] if len(coord) > 2 else ""
 
-    apt = apt_info(gi(it, "ltnoPnu"), bjd, bldg)
+    names = deal_names(lawd, umd, jibun)
+    apt = apt_info(gi(it, "ltnoPnu"), bjd, lawd, bldg, names, "아파트" in use or "아파트" in (bldg or ""))
     if "아파트" in use or apt.get("hh"): typ = "apt"
     elif any(k in use for k in VILLA):   typ = "villa"
     else:                                typ = "etc"
 
-    hist = deal_history(lawd, umd, jibun, bldg, area) if umd else []
+    hist = deal_history(lawd, umd, jibun, bldg, farea) if umd else []   # ★전체면적으로 매칭
     last = hist[0]["amt"] * 10000 if hist else None
     avg  = int(sum(h["amt"] for h in hist) / len(hist) * 10000) if hist else None
+    # ★지분물건은 실거래(전체) × 지분율로 환산해야 최저입찰가와 비교가 성립한다
+    last_adj = int(last * ratio) if (last and ratio) else last
 
     row = {
-        "id": gi(it, "cltrMngNo"), "cd": gi(it, "pbctCdtnNo"),
+        "id": mng, "cd": cdtn,
         "name": bldg or f"{umd} {jibun}", "addr": full, "gu": gu, "emd": umd, "jibun": jibun,
         "use": gi(it, "cltrUsgSclsCtgrNm") or gi(it, "cltrUsgMclsCtgrNm"),
         "type": typ, "isApt": typ == "apt", "kind": gi(it, "prptDivNm"),
         "area": area or "", "land": fnum(gi(it, "landSqms")) or "",
+        "fullArea": farea if ratio else "",              # 전체 전용면적(지분물건만)
+        "share": (sh or {}).get("txt", ""),              # "1/2"
+        "shareRatio": ratio or "",                       # 0.5
+        "shareRaw": (sh or {}).get("raw", ""),           # 온비드 비고 원문
         "min": minp, "aprs": aprs,
         "disc": round(minp / aprs * 100) if (minp and aprs) else None,
         "fail": num(gi(it, "usbdNft")), "round": num(gi(it, "pbctNsq", "pbctSqnc")),
         "status": gi(it, "pbctStatNm"), "bgn": _bgn(it), "end": _end(it),
         "ladder": ladder, "rounds": len(ladder),
-        "share": share_of(full),
         "org": gi(it, "orgNm"),
         "thumb": (gi(it, "thnlImgUrlAdr") or "").replace("&amp;", "&"),
-        "deal": last, "dealAvg": avg,
+        "deal": last,                                    # 실거래(전체 1채 기준)
+        "dealAdj": last_adj,                             # 지분 환산 실거래
+        "dealAvg": avg,
         "hist": [{"ym": h["ym"], "amt": h["amt"] * 10000, "area": h["area"], "fl": h["floor"]} for h in hist],
-        "gap": (last - minp) if (last and minp) else None,
+        "gap": (last_adj - minp) if (last_adj and minp) else None,
         "hh": apt.get("hh"), "dong": apt.get("dong"), "used": apt.get("used"),
         "heat": apt.get("heat"), "hall": apt.get("hall"), "kaptName": apt.get("kaptName"),
         "park": apt.get("park"), "subway": apt.get("subway"), "subwayMin": apt.get("subwayMin"),
@@ -453,7 +525,9 @@ def build(items, gu, gc):
             if lvl >= 2: stat["면적"] += 1
             if lvl >= 3: stat["지오코딩"] += 1; rows.append(row)
     print(f"    {gu}: " + " → ".join(f"{k} {v}" for k, v in stat.items()) + f" → 물건 {len(rows)}건"
-          f" (아파트 {sum(1 for r in rows if r['type']=='apt')}, 세대수확보 {sum(1 for r in rows if r.get('hh'))})")
+          f" (아파트 {sum(1 for r in rows if r['type']=='apt')},"
+          f" 세대수확보 {sum(1 for r in rows if r.get('hh'))},"
+          f" 지분 {sum(1 for r in rows if r.get('share'))})")
     return rows
 
 # ── 알림 ─────────────────────────────────────────────────────────────────
@@ -494,7 +568,6 @@ if __name__ == "__main__":
 
     gc = {}
     if os.path.exists(fp("geocode_cache.json")):
-        # 법정동코드(3번째 값)가 없는 구버전 캐시는 버리고 다시 지오코딩한다(세대수 조회에 필요)
         gc = {k: v for k, v in json.load(open(fp("geocode_cache.json"), encoding="utf-8")).items()
               if v and len(v) >= 3}
 
@@ -511,11 +584,14 @@ if __name__ == "__main__":
     open(fp("data.js"), "w", encoding="utf-8").write(
         "window.GONMAE = " + json.dumps(cur, ensure_ascii=False) + ";\n"
         "window.GONMAE_AT = " + json.dumps(time.strftime("%Y-%m-%d %H:%M", time.localtime(time.time() + 9 * 3600))) + ";")
-    print(f"[단지매칭] 시도 {_MATCH_STAT['try']} / 성공 {_MATCH_STAT['hit']} / 법정동코드없음 {_MATCH_STAT['nobjd']}")
+    print(f"[단지매칭] 시도 {_MATCH_STAT['try']} / 성공 {_MATCH_STAT['hit']} "
+          f"(구목록으로 구제 {_MATCH_STAT['viaSgg']}) / 법정동코드없음 {_MATCH_STAT['nobjd']}")
     print(f"완료: 총 {len(cur)}건 → data.js "
           f"(아파트 {sum(1 for x in cur if x['type']=='apt')} / "
           f"빌라 {sum(1 for x in cur if x['type']=='villa')} / "
           f"기타 {sum(1 for x in cur if x['type']=='etc')} / "
+          f"세대수 {sum(1 for x in cur if x.get('hh'))} / "
+          f"지분물건 {sum(1 for x in cur if x.get('share'))} / "
           f"온비드링크 {sum(1 for x in cur if x['on'])}건)")
 
     new = [x for x in cur if x["id"] and x["id"] not in prev_ids]
@@ -524,7 +600,8 @@ if __name__ == "__main__":
         for x in new[:8]:
             eok = (x["min"] / 1e8) if x["min"] else 0
             gap = f" / 실거래차 {x['gap']/1e8:.1f}억" if x.get("gap") else ""
-            lines.append(f"· [{x['gu']}] {x['use']} {x['area']}㎡ / 최저 {eok:.2f}억{gap}")
+            sh  = f" ⚠{x['share']}지분" if x.get("share") else ""
+            lines.append(f"· [{x['gu']}] {x['use']} {x['area']}㎡{sh} / 최저 {eok:.2f}억{gap}")
         kakao_send("\n".join(lines), PAGE_URL)
     else:
         print("  신규 0건 → 알림 생략")
