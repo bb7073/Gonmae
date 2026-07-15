@@ -1,7 +1,7 @@
 name: 공매 데이터 갱신
 on:
   schedule:
-    - cron: '0 21 * * *'
+    - cron: '0 0 * * *'   # 매일 00:00 UTC = 09:00 KST (깃허브 사정상 수십 분 밀릴 수 있음)
   workflow_dispatch:
 permissions:
   contents: write
@@ -18,8 +18,9 @@ jobs:
           DATA_KEY: ${{ secrets.DATA_KEY }}
           KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
           KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           REGION_SD: 서울특별시
-          REGION_GU: 광진구
         run: python fetch_gonmae.py
       - name: 결과 저장(커밋)
         run: |
