@@ -16,6 +16,8 @@ DATA_KEY      = os.environ.get("DATA_KEY", "").strip()
 KAKAO_REST    = os.environ.get("KAKAO_REST_KEY", "").strip()
 KAKAO_REFRESH = os.environ.get("KAKAO_REFRESH_TOKEN", "").strip()
 ONLY_GU       = os.environ.get("ONLY_GU", "").strip()
+TG_TOKEN      = os.environ.get("TELEGRAM_TOKEN", "").strip()
+TG_CHAT       = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 FORCE_NOTIFY  = os.environ.get("FORCE_NOTIFY", "") == "1"
 DEBUG_MNG     = os.environ.get("DEBUG_MNG", "").strip()   # 예: 2026-01663-001 → 상세 응답 원문 통째 출력
 
@@ -558,6 +560,68 @@ def kakao_send(text, link):
     except Exception as e:
         print(f"  (카카오 알림 실패: {e})")
 
+# ── 텔레그램 신규매물 알림 ──────────────────────────────────────────────
+def _eok(v):
+    try: return f"{v/1e8:.2f}억"
+    except Exception: return "—"
+
+def onbid_url(d):
+    o = d.get("on") or {}
+    if o.get("c") and o.get("p") and o.get("b") and o.get("cd"):
+        return ("https://m.onbid.co.kr/op/cltrpbancinf/cltrdtl/CltrDtlController/mvmnCltrDtl.do"
+                f"?cltrScrnGrpCd=0001&cltrPrptDivCd={o.get('dv') or '0007'}"
+                f"&onbidCltrno={o['c']}&onbidPbancNo={o['p']}&pbctNo={o['b']}&pbctCdtnNo={o['cd']}")
+    return ""
+
+def naver_map_url(d):
+    addr = re.sub(r"\s*외\s*\d+\s*필지", "", d.get("addr") or "")
+    addr = re.split(r"\s제?\s*[지B]?\d+\s*층", addr)[0]
+    addr = re.sub(r"\s*\([^)]*\)\s*$", "", addr).strip()
+    return "https://map.naver.com/p/search/" + urllib.parse.quote(addr)
+
+def tg_send(text):
+    if not (TG_TOKEN and TG_CHAT):
+        print("  (텔레그램 토큰/챗ID 없음 → 알림 생략)"); return False
+    try:
+        data = urllib.parse.urlencode({"chat_id": TG_CHAT, "text": text,
+                                       "disable_web_page_preview": "true"}).encode()
+        urllib.request.urlopen(urllib.request.Request(
+            f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", data=data), timeout=15)
+        return True
+    except urllib.error.HTTPError as e:
+        print(f"  (텔레그램 실패 HTTP {e.code}: {e.read().decode('utf-8','ignore')[:200]})")
+    except Exception as e:
+        print(f"  (텔레그램 실패: {e})")
+    return False
+
+def notify_new(items):
+    if not items:
+        print("  신규매물 없음 → 텔레그램 생략"); return
+    items = sorted(items, key=lambda x: -(x.get("gap") or 0))
+    header = f"🏠 새 공매 {len(items)}건 ({time.strftime('%Y-%m-%d', time.gmtime(time.time()+9*3600))})\n"
+    blocks = []
+    for d in items:
+        L = [f"• {d.get('name') or d.get('addr')}", f"  {d.get('addr','')}"]
+        disc = f" ({d['disc']}%)" if d.get("disc") else ""
+        L.append(f"  최저 {_eok(d.get('min'))} / 감정 {_eok(d.get('aprs'))}{disc}")
+        if (d.get("gap") or 0) > 0:
+            L.append(f"  실거래 대비 {_eok(d['gap'])} 낮음")
+        if d.get("hh"):    L.append(f"  세대수 {d['hh']}세대")
+        if d.get("share"): L.append(f"  ⚠️ 지분물건 {d['share']}")
+        ou = onbid_url(d)
+        if ou: L.append(f"  온비드 {ou}")
+        L.append(f"  네이버지도 {naver_map_url(d)}")
+        blocks.append("\n".join(L))
+    msg, sent = header, 0
+    for b in blocks:
+        if len(msg) + len(b) + 2 > 3800:
+            if tg_send(msg): sent += 1
+            msg = "(계속)\n"
+        msg += ("\n" if msg.strip() else "") + b
+    if msg.strip():
+        if tg_send(msg): sent += 1
+    print(f"  ✅ 텔레그램 신규매물 {len(items)}건 전송 (메시지 {sent}통)")
+
 if __name__ == "__main__":
     if not DATA_KEY:   print("ERROR: DATA_KEY 없음"); sys.exit(1)
     if not KAKAO_REST: print("ERROR: KAKAO_REST_KEY 없음"); sys.exit(1)
@@ -571,7 +635,7 @@ if __name__ == "__main__":
         gc = {k: v for k, v in json.load(open(fp("geocode_cache.json"), encoding="utf-8")).items()
               if v and len(v) >= 3}
 
-    prev_ids = {x.get("id") for x in read_prev() if x.get("id")}
+    prev_by_id = {x.get("id"): x for x in read_prev() if x.get("id")}
     cur, t0 = [], time.time()
     for i, gu in enumerate(gus, 1):
         print(f"[{i}/{len(gus)}] {gu} 시작 — 경과 {int(time.time()-t0)}초")
@@ -580,6 +644,19 @@ if __name__ == "__main__":
 
     print(f"전체 소요 {int(time.time()-t0)}초")
     cur.sort(key=lambda x: (x["gap"] is None, -(x["gap"] or 0)))
+
+    # 신규매물 판별: 최초 등장일(first) 기록 + 오늘 새로 뜬 건 골라내기
+    today = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 9 * 3600))
+    for x in cur:
+        p = prev_by_id.get(x.get("id"))
+        if p and p.get("first"):
+            x["first"] = p["first"]          # 이전 등장일 승계
+        elif p:
+            x["first"] = "-"                  # 이전에도 있었으나 미기록 → 오늘 신규 아님
+        else:
+            x["first"] = today                # 처음 보는 물건
+    new_items = [x for x in cur if x["first"] == today] if prev_by_id else []
+
     json.dump(gc, open(fp("geocode_cache.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     open(fp("data.js"), "w", encoding="utf-8").write(
         "window.GONMAE = " + json.dumps(cur, ensure_ascii=False) + ";\n"
@@ -593,6 +670,7 @@ if __name__ == "__main__":
           f"세대수 {sum(1 for x in cur if x.get('hh'))} / "
           f"지분물건 {sum(1 for x in cur if x.get('share'))} / "
           f"온비드링크 {sum(1 for x in cur if x['on'])}건)")
+    notify_new(new_items)
 
     new = [x for x in cur if x["id"] and x["id"] not in prev_ids]
     if new or FORCE_NOTIFY:
