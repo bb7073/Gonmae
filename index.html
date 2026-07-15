@@ -97,6 +97,15 @@ th{color:var(--muted);font-weight:500;font-size:12px}
 td:first-child,th:first-child{text-align:left}
 tr.cur td{color:var(--accent);font-weight:700}
 .empty{color:var(--muted);font-size:13px;padding:14px;background:var(--surface);border-radius:12px;text-align:center}
+.card{position:relative}
+.star{position:absolute;top:6px;right:6px;z-index:3;width:32px;height:32px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;font-size:18px;color:#5A6672;
+  background:rgba(0,0,0,.28);border:0;cursor:pointer;line-height:1;padding:0}
+.star.on{color:var(--accent)}
+.tag.new{background:#3A2A12;color:var(--accent);font-weight:800}
+.sheetstar{float:right;font-size:24px;color:#5A6672;background:none;border:0;cursor:pointer;
+  margin:-2px -4px 0 0;line-height:1}
+.sheetstar.on{color:var(--accent)}
 </style>
 </head>
 <body>
@@ -105,6 +114,7 @@ tr.cur td{color:var(--accent);font-weight:700}
   <h1>공매 헌터 <small id="meta"></small></h1>
   <div class="controls">
     <button class="chip" id="fBtn">⚙ 필터</button>
+    <button class="chip" id="xlsx">⬇ 엑셀</button>
     <select id="sort">
       <option value="gap">실거래 차액 큰 순</option>
       <option value="min">최저입찰가 낮은 순</option>
@@ -167,11 +177,14 @@ tr.cur td{color:var(--accent);font-weight:700}
 
 <nav>
   <button id="tabList" class="on"><b>▤</b>목록</button>
+  <button id="tabToday"><b>✦</b>오늘</button>
+  <button id="tabFav"><b>★</b>관심</button>
   <button id="tabMap"><b>◎</b>지도</button>
 </nav>
 
 <div id="sheet"><div class="sheetbody" id="sheetbody"></div></div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="data.js"></script>
 <script>
 const D = (window.GONMAE || []).map(d => ({...d, type: d.type || (d.isApt ? 'apt' : 'villa')}));
@@ -182,6 +195,15 @@ const ymd = s => s ? String(s).replace(/(\d{4})(\d{2})(\d{2}).*/, '$1.$2.$3') : 
 const dt  = s => s && String(s).length >= 12
   ? `${s.slice(0,4)}.${s.slice(4,6)}.${s.slice(6,8)} ${s.slice(8,10)}:${s.slice(10,12)}` : ymd(s);
 const TN = {apt:'아파트', villa:'빌라', etc:'기타'};
+
+/* 오늘의 매물 / 관심(즐겨찾기) */
+const TODAY = (window.GONMAE_AT || '').slice(0,10);
+const isNew = d => d.first && d.first === TODAY;
+const FAVKEY = 'gonmae_fav';
+let favs = new Set((()=>{ try{ return JSON.parse(localStorage.getItem(FAVKEY)||'[]'); }catch(_){ return []; } })());
+const isFav = d => favs.has(d.id);
+const saveFav = () => { try{ localStorage.setItem(FAVKEY, JSON.stringify([...favs])); }catch(_){} };
+const toggleFav = d => { favs.has(d.id) ? favs.delete(d.id) : favs.add(d.id); saveFav(); };
 
 /* ── 지분물건 헬퍼 ──────────────────────────────────────────────
    d.share      "1/2"        (온비드 세부정보 면적정보 비고에서 추출)
@@ -195,7 +217,7 @@ const adjDeal = d => d.dealAdj || d.deal || 0;
 
 const RANGE = ['p1','p2','v1','v2','a1','a2','f1','f2','d1','d2'];
 const blank = () => Object.fromEntries(RANGE.map(k => [k, null]));
-let state = {sort:'gap', gu:'', types:{apt:true, villa:true, etc:true}, noShare:false, ...blank()};
+let state = {sort:'gap', gu:'', view:'all', types:{apt:true, villa:true, etc:true}, noShare:false, ...blank()};
 
 $('#meta').textContent = `${D.length}건 · ${window.GONMAE_AT || ''}`;
 [...new Set(D.map(d => d.gu))].sort().forEach(g => {
@@ -214,6 +236,8 @@ function filtered(){
   }[state.sort];
   const rng = (v, lo, hi) => !((lo != null && v < lo) || (hi != null && v > hi));
   return D.filter(d => {
+    if(state.view === 'today' && !isNew(d)) return false;
+    if(state.view === 'fav'   && !isFav(d)) return false;
     if(state.gu && d.gu !== state.gu) return false;
     if(!state.types[d.type]) return false;
     if(state.noShare && isShare(d)) return false;                 // 지분 제외
@@ -238,12 +262,16 @@ function render(){
   const rows = filtered(), el = $('#list');
   $('#meta').textContent = `${rows.length}/${D.length}건 · ${window.GONMAE_AT || ''}`;
   $('#fCnt').textContent = `조건 충족 ${rows.length}건`;
-  if(!rows.length){ el.innerHTML = '<div class="empty">조건에 맞는 물건이 없습니다. 필터를 넓혀보세요.</div>'; }
+  const emptyMsg = state.view === 'today' ? '오늘 새로 올라온 물건이 없습니다.'
+                 : state.view === 'fav'   ? '관심(★) 표시한 물건이 없습니다. 카드의 별을 눌러 담아보세요.'
+                 : '조건에 맞는 물건이 없습니다. 필터를 넓혀보세요.';
+  if(!rows.length){ el.innerHTML = `<div class="empty">${emptyMsg}</div>`; }
   else el.innerHTML = rows.map((d,i) => `
     <div class="card ${isShare(d)?'share':''}" data-i="${i}">
+      <button class="star ${isFav(d)?'on':''}" data-star="${i}">${isFav(d)?'★':'☆'}</button>
       ${d.thumb ? `<img class="thumb" src="${d.thumb}" loading="lazy" onerror="this.style.visibility='hidden'">` : '<div class="thumb"></div>'}
       <div class="info">
-        <div class="line1"><span class="tag ${d.type}">${d.use || TN[d.type]}</span>
+        <div class="line1">${isNew(d) ? '<span class="tag new">NEW</span>' : ''}<span class="tag ${d.type}">${d.use || TN[d.type]}</span>
           ${isShare(d) ? `<span class="tag warn">⚠ 지분 ${d.share}</span>` : ''}<span>${d.gu}</span>
           ${d.fail ? `<span>· 유찰 ${d.fail}회</span>` : ''}${d.hh ? `<span>· ${d.hh}세대</span>` : ''}</div>
         <div class="nm">${d.name || d.addr}</div>
@@ -255,6 +283,9 @@ function render(){
         ${gapLine(d)}
       </div></div>`).join('');
   el.querySelectorAll('.card').forEach(c => c.onclick = () => openSheet(rows[+c.dataset.i]));
+  el.querySelectorAll('.star').forEach(s => s.onclick = e => {
+    e.stopPropagation(); toggleFav(rows[+s.dataset.star]); render();
+  });
   if(mapReady) drawPins();
 }
 
@@ -306,6 +337,7 @@ function openSheet(d){
   $('#sheetbody').innerHTML = `
     <div class="grip"></div>
     ${d.thumb ? `<img class="hero" src="${d.thumb}" onerror="this.remove()">` : ''}
+    <button class="sheetstar ${isFav(d)?'on':''}" id="shStar">${isFav(d)?'★':'☆'}</button>
     <h2 style="font-size:19px;margin:14px 0 4px">${d.name || d.addr}${sh?` <span style="color:var(--warn);font-size:14px">· 지분 ${d.share}</span>`:''}</h2>
     <div style="font-size:13px;color:var(--muted)">${d.addr}</div>
     ${shareBox}
@@ -348,11 +380,16 @@ function openSheet(d){
       최저입찰가는 <b>지금 진행/예정인 회차</b> 기준입니다. 유찰되면 다음 회차 가격으로 내려갑니다.
       입찰 전 온비드 원문·등기부를 반드시 확인하세요.</p>`;
   $('#sheet').classList.add('on');
+  enterOverlay('sheet');
   $('#goMap').onclick = () => { $('#sheet').classList.remove('on'); showMap(d); };
+  $('#shStar').onclick = () => {
+    toggleFav(d); const on = isFav(d), b = $('#shStar');
+    b.classList.toggle('on', on); b.textContent = on ? '★' : '☆'; render();
+  };
   const cp = $('#copyId');
   if(cp) cp.onclick = () => { navigator.clipboard?.writeText(d.id||''); cp.textContent = '복사됨 ✓'; };
 }
-$('#sheet').onclick = e => { if(e.target.id === 'sheet') $('#sheet').classList.remove('on'); };
+$('#sheet').onclick = e => { if(e.target.id === 'sheet') history.back(); };
 
 /* ── 지도: 가격 말풍선 마커 ── */
 let map, mapReady = false, pins = [];
@@ -388,20 +425,49 @@ function initMap(cb){
   s.onerror = () => $('#map').innerHTML = '<div class="empty" style="margin:20px">지도를 불러오지 못했습니다. 카카오 개발자센터 Web 플랫폼 도메인 등록을 확인하세요.</div>';
   document.head.append(s);
 }
+const nav = {list:$('#tabList'), today:$('#tabToday'), fav:$('#tabFav'), map:$('#tabMap')};
+function highlight(k){ Object.values(nav).forEach(b => b.classList.remove('on')); nav[k].classList.add('on'); }
+
+/* ── 뒤로가기: 시트/지도 오버레이를 브라우저 히스토리에 얹어
+      본래 뒤로가기 버튼이 창을 닫지 않고 한 단계만 돌아가게 함 ── */
+let overlay = null;
+function enterOverlay(kind){
+  if(overlay === null) history.pushState({ov:kind}, '');
+  else if(overlay === 'sheet' && kind === 'map') history.replaceState({ov:kind}, ''); // 상세→지도: 대체
+  else history.pushState({ov:kind}, '');                                              // 지도→상세: 누적
+  overlay = kind;
+}
+function exitMap(){ document.body.classList.remove('mapmode'); highlight(state.view === 'all' ? 'list' : state.view); }
+window.addEventListener('popstate', () => {
+  if($('#sheet').classList.contains('on')){
+    $('#sheet').classList.remove('on');
+    overlay = document.body.classList.contains('mapmode') ? 'map' : null; return;
+  }
+  if(document.body.classList.contains('mapmode')){ exitMap(); overlay = null; return; }
+  overlay = null;
+});
+
 function showMap(focus){
+  enterOverlay('map');
   document.body.classList.add('mapmode');
-  $('#tabMap').classList.add('on'); $('#tabList').classList.remove('on');
+  highlight('map');
   initMap(() => {
     map.relayout();
     if(focus){ map.setLevel(3); map.setCenter(new kakao.maps.LatLng(focus.lat, focus.lng)); }
     drawPins();
   });
 }
-$('#tabMap').onclick = () => showMap(null);
-$('#tabList').onclick = () => {
+function goView(v){
+  if(overlay === 'map'){ history.back(); overlay = null; }   // 지도 히스토리 항목 소비
   document.body.classList.remove('mapmode');
-  $('#tabList').classList.add('on'); $('#tabMap').classList.remove('on');
-};
+  state.view = v;
+  highlight(v === 'all' ? 'list' : v);
+  render(); window.scrollTo(0,0);
+}
+nav.list.onclick  = () => goView('all');
+nav.today.onclick = () => goView('today');
+nav.fav.onclick   = () => goView('fav');
+nav.map.onclick   = () => showMap(null);
 
 /* ── 필터 바인딩 (목록·지도 공통) ── */
 function syncUI(){
@@ -427,6 +493,58 @@ $$('[data-t]').forEach(c => c.onclick = () => {
 RANGE.forEach(k => $('#'+k).oninput = e => {
   state[k] = e.target.value === '' ? null : parseFloat(e.target.value); render();
 });
+
+/* ── 엑셀(.xlsx) 추출 : 현재 화면(구·유형·범위·오늘/관심 탭)에 걸린 물건만 ── */
+function naverMap(d){
+  const addr = (d.addr || '').replace(/\s*외\s*\d+\s*필지/, '')
+    .split(/\s제?\s*[지B]?\d+\s*층/)[0].replace(/\s*\([^)]*\)\s*$/, '').trim();
+  return 'https://map.naver.com/p/search/' + encodeURIComponent(addr);
+}
+function floorMin(d){
+  const l = (d.ladder || []).map(x => x.min).filter(Boolean);
+  return l.length ? Math.min(...l) : (d.min || '');
+}
+function scopeName(){
+  const p = [];
+  if(state.view === 'today') p.push('오늘');
+  if(state.view === 'fav')   p.push('관심');
+  p.push(state.gu || '서울전체');
+  const t = ['apt','villa','etc'].filter(k => state.types[k]).map(k => TN[k]);
+  if(t.length < 3) p.push(t.join('+') || '없음');
+  return p.join('_');
+}
+function exportRows(){
+  const rows = filtered();
+  if(!rows.length){ alert('내보낼 물건이 없습니다. 필터/탭을 확인하세요.'); return; }
+  const head = ['물건명','주소','현재 입찰가','감정평가액','최저입찰가(최종회차)','감정가 대비(%)',
+    '실거래가','실거래 대비 차액','세대수(아파트)','지분 경고','온비드 링크','네이버 지도 링크'];
+  const aoa = [head];
+  rows.forEach(d => {
+    const fl = floorMin(d);
+    aoa.push([
+      d.name || '', d.addr || '', d.min || '', d.aprs || '', fl || '',
+      (d.aprs && fl) ? Math.round(fl / d.aprs * 100) : '',
+      d.deal || '', (d.gap > 0 ? d.gap : ''),
+      d.hh || '', isShare(d) ? ('⚠️ 지분 ' + d.share) : '',
+      onbidUrl(d) || '', naverMap(d)
+    ]);
+  });
+  const fname = `공매_${TODAY || 'export'}_${scopeName()}`;
+  if(window.XLSX){
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [{wch:18},{wch:42},{wch:13},{wch:13},{wch:16},{wch:11},
+      {wch:13},{wch:14},{wch:11},{wch:12},{wch:32},{wch:32}];
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '공매');
+    XLSX.writeFile(wb, fname + '.xlsx');
+  } else {                                   // CDN 미로딩 시 CSV 폴백
+    const csv = '\ufeff' + aoa.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+    a.download = fname + '.csv'; a.click();
+  }
+}
+$('#xlsx').onclick = exportRows;
+
 render();
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>
