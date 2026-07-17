@@ -671,15 +671,3 @@ if __name__ == "__main__":
           f"지분물건 {sum(1 for x in cur if x.get('share'))} / "
           f"온비드링크 {sum(1 for x in cur if x['on'])}건)")
     notify_new(new_items)
-
-    new = [x for x in cur if x["id"] and x["id"] not in prev_ids]
-    if new or FORCE_NOTIFY:
-        lines = [f"🏠 신규 공매 {len(new)}건 (서울 전체 {len(cur)}건)"]
-        for x in new[:8]:
-            eok = (x["min"] / 1e8) if x["min"] else 0
-            gap = f" / 실거래차 {x['gap']/1e8:.1f}억" if x.get("gap") else ""
-            sh  = f" ⚠{x['share']}지분" if x.get("share") else ""
-            lines.append(f"· [{x['gu']}] {x['use']} {x['area']}㎡{sh} / 최저 {eok:.2f}억{gap}")
-        kakao_send("\n".join(lines), PAGE_URL)
-    else:
-        print("  신규 0건 → 알림 생략")
