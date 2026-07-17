@@ -1,0 +1,36 @@
+name: update-gyeongmae
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'   # 매일 09:00 KST (00:00 UTC)
+
+permissions:
+  contents: write
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: install
+        run: pip install requests
+
+      - name: crawl courtauction
+        env:
+          KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
+          DATA_KEY: ${{ secrets.DATA_KEY }}
+        run: python fetch_gyeongmae.py 2>&1 | tee crawl_gyeongmae.log
+
+      - name: commit data
+        run: |
+          git config user.name  "github-actions"
+          git config user.email "actions@github.com"
+          git add data_gyeongmae.js geocode_cache.json deal_cache.json || true
+          git commit -m "update gyeongmae $(date +%F)" || echo "no changes"
+          git push || echo "push skipped"
