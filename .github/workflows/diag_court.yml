@@ -1,0 +1,17 @@
+name: diag-court
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: install
+        run: pip install requests
+      - name: diagnose
+        run: python diag_court.py 2>&1 | tee diag.log
