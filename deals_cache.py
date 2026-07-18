@@ -121,7 +121,7 @@ def _chunk(lawd, kind, ym):
     global _dirty
     key = f"{lawd}|{ym}|{kind}"
     cur = _this_ym()
-    if ym != cur and key in _store:
+    if ym != cur and isinstance(_store, dict) and key in _store:
         return _store[key]                 # 과거달 캐시 히트
     recs = _fetch_chunk(lawd, kind, ym)
     if ym != cur:                          # 과거달만 영구 저장(이번달은 계속 바뀌니 저장X)

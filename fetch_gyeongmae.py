@@ -43,6 +43,8 @@ IDX_URL  = BASE + "/pgj/index.on"
 
 KAKAO_KEY = os.environ.get("KAKAO_REST_KEY", "").strip()
 DATA_KEY  = os.environ.get("DATA_KEY", "").strip()
+if DATA_KEY:
+    DC.init(DATA_KEY, months=24)
 
 COURTS = {
     "B000210": "서울중앙지방법원",
