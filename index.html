@@ -10,7 +10,8 @@
 <script>const KAKAO_JS_KEY = "9a5c9457313bde76febd1abc9f4056cc";</script>
 <style>
 :root{--bg:#0F1216;--surface:#171C22;--surface2:#1E252D;--line:#2A333D;
-  --text:#E9EEF3;--muted:#8B98A5;--accent:#FFC24B;--good:#3ED598;--apt:#4C9DF7;--villa:#2FBF71;--etc:#8B98A5;--warn:#FF7B72;--r:14px}
+  --text:#E9EEF3;--muted:#8B98A5;--accent:#FFC24B;--good:#3ED598;--apt:#4C9DF7;--villa:#2FBF71;--etc:#8B98A5;--warn:#FF7B72;--r:14px;
+  --gm:#B98CFF;--gm-dim:#3A2E52}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{margin:0;background:var(--bg);color:var(--text);
   font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Noto Sans KR",sans-serif;
@@ -26,6 +27,7 @@ select,.chip,input{background:var(--surface2);color:var(--text);border:1px solid
   border-radius:999px;padding:7px 12px;font-size:13px;white-space:nowrap;flex:0 0 auto}
 .chip.on{background:var(--accent);color:#101317;border-color:var(--accent);font-weight:700}
 .chip.warnon{background:var(--warn);color:#1A0E10;border-color:var(--warn);font-weight:700}
+.chip.srcon{background:var(--gm);color:#161022;border-color:var(--gm);font-weight:700}
 #panel{display:none;padding:12px 14px 4px;border-bottom:1px solid var(--line);background:var(--surface)}
 #panel.on{display:block}
 .frow{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:13px}
@@ -35,13 +37,16 @@ main{padding:12px 12px 0}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
   padding:12px;margin-bottom:10px;display:flex;gap:12px;cursor:pointer}
 .card.share{border-color:#5A2E33}
+.card.gm{border-left:3px solid var(--gm)}
 .thumb{width:74px;height:74px;border-radius:10px;object-fit:cover;background:var(--surface2);flex:0 0 auto}
 .info{flex:1;min-width:0}
-.line1{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
+.line1{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted);flex-wrap:wrap}
 .tag{background:var(--surface2);border-radius:6px;padding:2px 6px;font-size:11px}
 .tag.apt{background:#24384A;color:#8FC7FF}
 .tag.villa{background:#1F3A2C;color:#7FE0AC}
 .tag.warn{background:#3A2226;color:#FF9E97;font-weight:700}
+.tag.src-gonmae{background:#2E2A18;color:#FFD98A;font-weight:700}
+.tag.src-gm{background:#2E2452;color:#CDB4FF;font-weight:700}
 .nm{font-size:15px;font-weight:700;margin:4px 0 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .addr{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .prices{display:flex;gap:10px;align-items:baseline;margin-top:6px;flex-wrap:wrap}
@@ -72,6 +77,9 @@ body.mapmode header,body.mapmode main{display:none}
 .pin.etc .bub{background:#5A6672;border-top-color:#5A6672}
 .pin.hot .bub{background:var(--accent);color:#101317;border-top-color:var(--accent)}
 .pin.share .bub{background:var(--warn);color:#1A0E10;border-top-color:var(--warn)}
+.pin.gm .bub{background:var(--gm);color:#161022;border-top-color:var(--gm)}
+.pin.gm.hot .bub{background:var(--accent);color:#101317;border-top-color:var(--accent)}
+.pin .bub em{font-style:normal;font-size:9px;opacity:.85;margin-right:3px;font-weight:900}
 nav{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;background:rgba(15,18,22,.96);
   backdrop-filter:blur(10px);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
 nav button{flex:1;background:none;border:0;color:var(--muted);padding:12px 0 14px;font-size:12px;font-weight:600}
@@ -106,6 +114,9 @@ tr.cur td{color:var(--accent);font-weight:700}
 .sheetstar{float:right;font-size:24px;color:#5A6672;background:none;border:0;cursor:pointer;
   margin:-2px -4px 0 0;line-height:1}
 .sheetstar.on{color:var(--accent)}
+.gmbox{background:#211934;border:1px solid #3A2E52;border-radius:12px;padding:11px 12px;
+  font-size:13px;line-height:1.55;color:#D6C7FF;margin:14px 0 0}
+.gmbox b{color:#CDB4FF}
 </style>
 </head>
 <body>
@@ -115,6 +126,9 @@ tr.cur td{color:var(--accent);font-weight:700}
   <div class="controls">
     <button class="chip" id="fBtn">⚙ 필터</button>
     <button class="chip" id="xlsx">⬇ 엑셀</button>
+    <button class="chip srcon" data-src="all">전체</button>
+    <button class="chip" data-src="gonmae">공매</button>
+    <button class="chip" data-src="gm">⚖경매</button>
     <select id="sort">
       <option value="gap">실거래 차액 큰 순</option>
       <option value="min">최저입찰가 낮은 순</option>
@@ -165,6 +179,9 @@ tr.cur td{color:var(--accent);font-weight:700}
 
 <div id="mapview">
   <div id="mapbar">
+    <button class="chip srcon" data-src2="all">전체</button>
+    <button class="chip" data-src2="gonmae">공매</button>
+    <button class="chip" data-src2="gm">⚖경매</button>
     <select id="gu2"><option value="">서울 전체</option></select>
     <button class="chip on" data-t="apt">아파트</button>
     <button class="chip on" data-t="villa">빌라</button>
@@ -186,8 +203,11 @@ tr.cur td{color:var(--accent);font-weight:700}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="data.js"></script>
+<script src="data_gyeongmae.js"></script>
 <script>
-const D = (window.GONMAE || []).map(d => ({...d, type: d.type || (d.isApt ? 'apt' : 'villa')}));
+/* ── 공매(GONMAE) + 경매(GYEONGMAE) 통합 로드 ──────────────────
+   공매는 기존 스키마 그대로. 경매는 gmToGonmae()로 공매 필드에 흡수.
+   원본 경매값은 g* 필드로 별도 보존(상세시트 분기용).                */
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const eok = v => v ? (v/1e8).toFixed(2) + '억' : '—';
@@ -196,8 +216,55 @@ const dt  = s => s && String(s).length >= 12
   ? `${s.slice(0,4)}.${s.slice(4,6)}.${s.slice(6,8)} ${s.slice(8,10)}:${s.slice(10,12)}` : ymd(s);
 const TN = {apt:'아파트', villa:'빌라', etc:'기타'};
 
+function normType(t, usg){
+  if(t === 'apt' || t === 'villa' || t === 'etc') return t;
+  const u = (usg || t || '');
+  if(u.includes('아파트')) return 'apt';
+  if(/다세대|다가구|연립|단독|빌라/.test(u)) return 'villa';
+  return 'etc';
+}
+
+/* 경매 1건 → 공매 카드 스키마로 흡수 */
+function gmToGonmae(g){
+  const type = normType(g.kind, g.usg);
+  const disc = (g.lowRate != null) ? Math.round(g.lowRate)
+             : (g.gaman && g.low ? Math.round(g.low / g.gaman * 100) : null);
+  const ladder = (g.ladder || []).map(l => ({
+    rd: l.rd || '', end: (l.ymd ? String(l.ymd) + '0000' : ''), min: l.low,
+    rslt: l.rslt, amt: l.amt
+  }));
+  return {
+    src: 'gm',
+    id: g.caseNo || (g.court + '_' + (g.saNo||'') + '_' + (g.gdsSeq||'')),
+    type, use: g.usg || TN[type],
+    name: g.name || g.addr, addr: g.addr, gu: g.gu,
+    lat: g.lat, lng: g.lng,
+    min: g.low, aprs: g.gaman, disc,
+    area: g.area, fullArea: null,
+    fail: g.yuchal || 0,
+    deal: g.deal, dealAdj: g.dealAdj, dealAvg: g.dealAvg, gap: g.gap,
+    hist: g.hist || [], ladder,
+    share: g.jibun ? '지분' : null, shareRaw: g.jibun || '',
+    thumb: null, hh: null,
+    end: g.saleDate ? String(g.saleDate) + '0000' : '',
+    bgn: '', status: g.maeAmt ? '매각(낙찰)' : '진행중',
+    first: g.first || null,
+    // 경매 원본 보존
+    gCourt: g.court, gGyae: g.gyae, gCase: g.caseNo || g.srnSaNo,
+    gSale: g.saleDate, gDecide: g.decideDate, gMae: g.maeAmt,
+    gSpecial: g.special, gJibun: g.jibun
+  };
+}
+
+const G_ON = (typeof window.GONMAE !== 'undefined' && window.GONMAE) ? window.GONMAE : [];
+const G_GM = (typeof window.GYEONGMAE !== 'undefined' && window.GYEONGMAE) ? window.GYEONGMAE : [];
+const D = [
+  ...G_ON.map(d => ({...d, src: d.src || 'gonmae', type: d.type || (d.isApt ? 'apt' : 'villa')})),
+  ...G_GM.map(gmToGonmae)
+];
+
 /* 오늘의 매물 / 관심(즐겨찾기) */
-const TODAY = (window.GONMAE_AT || '').slice(0,10);
+const TODAY = ((window.GONMAE_AT || window.GYEONGMAE_AT || '') + '').slice(0,10);
 const isNew = d => d.first && d.first === TODAY;
 const FAVKEY = 'gonmae_fav';
 let favs = new Set((()=>{ try{ return JSON.parse(localStorage.getItem(FAVKEY)||'[]'); }catch(_){ return []; } })());
@@ -205,22 +272,16 @@ const isFav = d => favs.has(d.id);
 const saveFav = () => { try{ localStorage.setItem(FAVKEY, JSON.stringify([...favs])); }catch(_){} };
 const toggleFav = d => { favs.has(d.id) ? favs.delete(d.id) : favs.add(d.id); saveFav(); };
 
-/* ── 지분물건 헬퍼 ──────────────────────────────────────────────
-   d.share      "1/2"        (온비드 세부정보 면적정보 비고에서 추출)
-   d.shareRatio 0.5
-   d.fullArea   59.97        (전체 전용면적. d.area는 지분면적)
-   d.deal       실거래(1채 전체) / d.dealAdj 실거래 × 지분율
-   d.gap        dealAdj - 최저입찰가                              */
+const isGm = d => d.src === 'gm';
 const isShare = d => !!d.share;
-const effArea = d => +d.fullArea || +d.area || 0;      // 필터·비교는 전체면적 기준
+const effArea = d => +d.fullArea || +d.area || 0;
 const adjDeal = d => d.dealAdj || d.deal || 0;
 
 const RANGE = ['p1','p2','v1','v2','a1','a2','f1','f2','d1','d2'];
 const blank = () => Object.fromEntries(RANGE.map(k => [k, null]));
-let state = {sort:'gap', gu:'', view:'all', types:{apt:true, villa:true, etc:true}, noShare:false, ...blank()};
+let state = {sort:'gap', gu:'', view:'all', src:'all', types:{apt:true, villa:true, etc:true}, noShare:false, ...blank()};
 
-$('#meta').textContent = `${D.length}건 · ${window.GONMAE_AT || ''}`;
-[...new Set(D.map(d => d.gu))].sort().forEach(g => {
+[...new Set(D.map(d => d.gu))].filter(Boolean).sort().forEach(g => {
   ['#gu','#gu2'].forEach(sel => {
     const o = document.createElement('option'); o.value = o.textContent = g; $(sel).append(o);
   });
@@ -236,43 +297,50 @@ function filtered(){
   }[state.sort];
   const rng = (v, lo, hi) => !((lo != null && v < lo) || (hi != null && v > hi));
   return D.filter(d => {
+    if(state.src !== 'all' && d.src !== state.src) return false;
     if(state.view === 'today' && !isNew(d)) return false;
     if(state.view === 'fav'   && !isFav(d)) return false;
     if(state.gu && d.gu !== state.gu) return false;
     if(!state.types[d.type]) return false;
-    if(state.noShare && isShare(d)) return false;                 // 지분 제외
-    if(!rng((d.min||0)/1e8,  state.p1, state.p2)) return false;   // 최저입찰가(억)
-    if(!rng((d.aprs||0)/1e8, state.v1, state.v2)) return false;   // 감정가(억)
-    if(!rng(effArea(d),      state.a1, state.a2)) return false;   // 전용면적(㎡·전체기준)
-    if(!rng(d.fail || 0,     state.f1, state.f2)) return false;   // 유찰횟수(회)
-    if(!rng(d.disc || 0,     state.d1, state.d2)) return false;   // 감정가 대비(%)
+    if(state.noShare && isShare(d)) return false;
+    if(!rng((d.min||0)/1e8,  state.p1, state.p2)) return false;
+    if(!rng((d.aprs||0)/1e8, state.v1, state.v2)) return false;
+    if(!rng(effArea(d),      state.a1, state.a2)) return false;
+    if(!rng(d.fail || 0,     state.f1, state.f2)) return false;
+    if(!rng(d.disc || 0,     state.d1, state.d2)) return false;
     return true;
   }).sort(key);
 }
 
 function gapLine(d){
   if(!(d.gap > 0)) return '<div class="gaptxt none">실거래 매칭 없음</div>';
-  const base = isShare(d)
+  const base = isShare(d) && d.dealAdj
     ? `실거래 ${eok(d.deal)} × ${d.share} = ${eok(adjDeal(d))} 대비`
     : `실거래 ${eok(d.deal)} 대비`;
   return `<div class="gaptxt">${base} <b>${eok(d.gap)} 낮음</b></div>`;
 }
 
+function srcTag(d){
+  return isGm(d)
+    ? '<span class="tag src-gm">⚖경매</span>'
+    : '<span class="tag src-gonmae">공매</span>';
+}
+
 function render(){
   const rows = filtered(), el = $('#list');
-  $('#meta').textContent = `${rows.length}/${D.length}건 · ${window.GONMAE_AT || ''}`;
+  $('#meta').textContent = `${rows.length}/${D.length}건 · ${TODAY || ''}`;
   $('#fCnt').textContent = `조건 충족 ${rows.length}건`;
   const emptyMsg = state.view === 'today' ? '오늘 새로 올라온 물건이 없습니다.'
                  : state.view === 'fav'   ? '관심(★) 표시한 물건이 없습니다. 카드의 별을 눌러 담아보세요.'
                  : '조건에 맞는 물건이 없습니다. 필터를 넓혀보세요.';
   if(!rows.length){ el.innerHTML = `<div class="empty">${emptyMsg}</div>`; }
   else el.innerHTML = rows.map((d,i) => `
-    <div class="card ${isShare(d)?'share':''}" data-i="${i}">
+    <div class="card ${isShare(d)?'share':''} ${isGm(d)?'gm':''}" data-i="${i}">
       <button class="star ${isFav(d)?'on':''}" data-star="${i}">${isFav(d)?'★':'☆'}</button>
       ${d.thumb ? `<img class="thumb" src="${d.thumb}" loading="lazy" onerror="this.style.visibility='hidden'">` : '<div class="thumb"></div>'}
       <div class="info">
-        <div class="line1">${isNew(d) ? '<span class="tag new">NEW</span>' : ''}<span class="tag ${d.type}">${d.use || TN[d.type]}</span>
-          ${isShare(d) ? `<span class="tag warn">⚠ 지분 ${d.share}</span>` : ''}<span>${d.gu}</span>
+        <div class="line1">${isNew(d) ? '<span class="tag new">NEW</span>' : ''}${srcTag(d)}<span class="tag ${d.type}">${d.use || TN[d.type]}</span>
+          ${isShare(d) ? `<span class="tag warn">⚠ ${d.share}</span>` : ''}<span>${d.gu}</span>
           ${d.fail ? `<span>· 유찰 ${d.fail}회</span>` : ''}${d.hh ? `<span>· ${d.hh}세대</span>` : ''}</div>
         <div class="nm">${d.name || d.addr}</div>
         <div class="addr">${d.addr}</div>
@@ -289,13 +357,17 @@ function render(){
   if(mapReady) drawPins();
 }
 
-/* 온비드 물건 상세 딥링크 (ID 4종이 수집된 경우) */
+/* 온비드 물건 상세 딥링크 (공매) */
 function onbidUrl(d){
   const o = d.on;
   if(!(o && o.c && o.p && o.b && o.cd)) return null;
   return `https://m.onbid.co.kr/op/cltrpbancinf/cltrdtl/CltrDtlController/mvmnCltrDtl.do`
        + `?cltrScrnGrpCd=0001&cltrPrptDivCd=${o.dv || '0007'}`
        + `&onbidCltrno=${o.c}&onbidPbancNo=${o.p}&pbctNo=${o.b}&pbctCdtnNo=${o.cd}`;
+}
+/* 법원경매 물건상세 검색 페이지 (경매) */
+function courtUrl(){
+  return 'https://www.courtauction.go.kr/pgj/index.on?w2xPath=/pgj/ui/pgj100/PGJ151F00.xml';
 }
 
 function naverUrl(d){
@@ -312,64 +384,77 @@ function openSheet(d){
   const nv = naverUrl(d);
   const hist = d.hist || [], lad = d.ladder || [];
   const max = Math.max(...hist.map(h => h.amt), 1);
-  const url = onbidUrl(d);
+  const gm = isGm(d);
+  const url = gm ? null : onbidUrl(d);
   const sh = isShare(d);
 
   const shareBox = sh ? `
     <div class="warnbox">
-      <b>⚠ 지분 물건 — 집 전체가 아니라 ${d.share} 지분만 매각됩니다.</b><br>
+      <b>⚠ 지분 물건 — 집 전체가 아니라 일부 지분만 매각됩니다.</b><br>
       낙찰받아도 나머지 공유자와 <b>공유관계</b>가 되며, 단독 사용·처분이 불가능합니다.
-      (실무상 공유물분할청구소송 → 경매로 이어지는 경우가 많습니다.)
-      ${d.fullArea ? `<br>전용 <b>${d.fullArea}㎡</b> 중 <b>${d.area}㎡</b>(${d.share})가 매각 대상.` : ''}
-      ${d.shareRaw ? `<small>온비드 원문: ${d.shareRaw}</small>` : ''}
-      <small>아래 실거래·차액은 전체 거래가에 지분율(${d.share})을 곱해 환산한 값입니다.</small>
+      ${gm ? '경매의 경우 다른 공유자에게 <b>공유자 우선매수권</b>이 있어 낙찰이 뒤집힐 수 있습니다.' :
+             '(실무상 공유물분할청구소송 → 경매로 이어지는 경우가 많습니다.)'}
+      ${d.shareRaw ? `<small>원문: ${d.shareRaw}</small>` : ''}
+      ${d.dealAdj ? `<small>아래 차액은 전체 거래가에 지분율을 곱해 환산한 값입니다.</small>` : ''}
+    </div>` : '';
+
+  const gmBox = gm ? `
+    <div class="gmbox">
+      <b>⚖ 법원경매 물건</b> · ${d.gCourt || ''} ${d.gGyae || ''}<br>
+      사건번호 <b>${d.gCase || d.id}</b>
+      ${d.gMae ? `<br>이미 <b>낙찰</b>된 물건입니다 (낙찰가 ${eok(d.gMae)}).` : ''}
+      ${d.gSpecial ? `<small>특별매각조건: ${d.gSpecial}</small>` : ''}
     </div>` : '';
 
   const aptRows = d.hh ? `
       <dt>단지</dt><dd>${d.kaptName || d.name}</dd>
       <dt>세대수 / 동수</dt><dd style="color:var(--apt)">${d.hh}세대 / ${d.dong || '—'}개동</dd>
-      <dt>사용승인일</dt><dd>${ymd(d.used)}</dd>
-      <dt>난방 / 복도</dt><dd style="font-weight:400;font-size:13px">${d.heat||'—'} / ${d.hall||'—'}</dd>
-      ${d.park ? `<dt>주차</dt><dd>${d.park}대</dd>` : ''}
-      ${d.subway ? `<dt>지하철</dt><dd style="font-weight:400;font-size:13px">${d.subway}${d.subwayMin?` · ${d.subwayMin}`:''}</dd>` : ''}`
-    : (d.type === 'apt' ? `<dt>세대수</dt><dd style="color:var(--muted);font-weight:400">K-apt 미등록 / 단지 매칭 실패</dd>` : '');
+      <dt>사용승인일</dt><dd>${ymd(d.used)}</dd>`
+    : (d.type === 'apt' && !gm ? `<dt>세대수</dt><dd style="color:var(--muted);font-weight:400">단지 매칭 실패</dd>` : '');
 
   $('#sheetbody').innerHTML = `
     <div class="grip"></div>
     ${d.thumb ? `<img class="hero" src="${d.thumb}" onerror="this.remove()">` : ''}
     <button class="sheetstar ${isFav(d)?'on':''}" id="shStar">${isFav(d)?'★':'☆'}</button>
-    <h2 style="font-size:19px;margin:14px 0 4px">${d.name || d.addr}${sh?` <span style="color:var(--warn);font-size:14px">· 지분 ${d.share}</span>`:''}</h2>
-    <div style="font-size:13px;color:var(--muted)">${d.addr}</div>
+    <h2 style="font-size:19px;margin:14px 0 4px">${d.name || d.addr}${sh?` <span style="color:var(--warn);font-size:14px">· ${d.share}</span>`:''}</h2>
+    <div style="font-size:13px;color:var(--muted)">${srcTag(d).replace(/<[^>]+>/g,m=>m)} ${d.addr}</div>
+    ${gmBox}
     ${shareBox}
     <dl class="kv num">
       <dt>최저입찰가 (현재 회차)</dt><dd style="color:var(--accent);font-size:17px">${eok(d.min)}</dd>
       <dt>감정가</dt><dd>${eok(d.aprs)} <span style="color:var(--muted)">(${d.disc||'—'}%)</span></dd>
+      ${gm && d.gMae ? `<dt style="color:var(--good)">낙찰가</dt><dd style="color:var(--good)">${eok(d.gMae)}</dd>` : ''}
       <dt>최근 실거래 ${sh?'(전체)':''}</dt><dd>${d.deal ? eok(d.deal) : '매칭 없음'}</dd>
-      ${sh && d.deal ? `<dt style="color:var(--warn)">지분 ${d.share} 환산</dt>
+      ${sh && d.dealAdj ? `<dt style="color:var(--warn)">지분 환산</dt>
         <dd style="color:var(--warn)">${eok(adjDeal(d))}</dd>` : ''}
       <dt>실거래 평균 (2년)</dt><dd>${d.dealAvg ? eok(d.dealAvg) : '—'}</dd>
       <dt>차액${sh?' (환산 기준)':''}</dt><dd style="color:${d.gap>0?'var(--good)':'var(--muted)'}">${d.gap>0 ? eok(d.gap) : '—'}</dd>
-      <dt>건물 / 대지</dt><dd>${d.area||'—'}㎡ / ${d.land||'—'}㎡</dd>
-      ${sh && d.fullArea ? `<dt style="color:var(--warn)">전체 전용면적</dt>
-        <dd style="color:var(--warn)">${d.fullArea}㎡ 중 ${d.share}</dd>` : ''}
+      <dt>전용면적</dt><dd>${d.area||'—'}㎡</dd>
       <dt>구분</dt><dd>${TN[d.type]} · ${d.use||'—'}</dd>
       ${aptRows}
-      <dt>회차 / 유찰</dt><dd>${d.round||'—'}회차 / ${d.fail||0}회</dd>
-      <dt>입찰기간</dt><dd style="font-weight:400;font-size:13px">${dt(d.bgn)} ~ ${dt(d.end)}</dd>
+      <dt>유찰</dt><dd>${d.fail||0}회</dd>
+      ${gm ? `<dt>매각기일</dt><dd style="font-weight:400;font-size:13px">${ymd(d.gSale)}</dd>
+              <dt>매각결정기일</dt><dd style="font-weight:400;font-size:13px">${ymd(d.gDecide)}</dd>`
+           : `<dt>입찰기간</dt><dd style="font-weight:400;font-size:13px">${dt(d.bgn)} ~ ${dt(d.end)}</dd>`}
       <dt>진행상태</dt><dd style="font-weight:400;font-size:13px">${d.status||'—'}</dd>
-      <dt>물건관리번호</dt><dd style="font-weight:400;font-size:13px">${d.id||'—'}</dd>
+      <dt>${gm?'사건번호':'물건관리번호'}</dt><dd style="font-weight:400;font-size:13px">${(gm?d.gCase:d.id)||'—'}</dd>
     </dl>
     <div class="btns">
       <button class="primary" id="goMap">지도에서 보기</button>
-      ${url ? `<a href="${url}" target="_blank">온비드 물건보기</a>`
-            : `<button id="copyId">물건번호 복사</button>`}
+      ${gm ? `<button id="copyId">사건번호 복사</button>`
+            : (url ? `<a href="${url}" target="_blank">온비드 물건보기</a>`
+                   : `<button id="copyId">물건번호 복사</button>`)}
       <a href="https://map.kakao.com/link/map/${q},${d.lat},${d.lng}" target="_blank">카카오맵</a>
       <a href="${nv.u}" target="_blank">${nv.t}</a>
     </div>
-    ${lad.length > 1 ? `<h3>회차별 최저입찰가 (${lad.length}회차)</h3>
-      <table><tr><th>회차</th><th>입찰마감</th><th>최저입찰가</th></tr>
+    ${gm ? `<div style="margin:10px 0 0"><a href="${courtUrl()}" target="_blank"
+        style="display:block;text-align:center;padding:11px 0;border-radius:12px;font-size:13px;
+        border:1px solid var(--gm);color:var(--gm);text-decoration:none">법원경매정보 사이트 열기 →</a></div>` : ''}
+    ${lad.length > 1 ? `<h3>회차별 ${gm?'기일':'최저입찰가'} (${lad.length}회차)</h3>
+      <table><tr><th>회차</th><th>${gm?'매각기일':'입찰마감'}</th><th>최저입찰가</th>${gm?'<th>결과</th>':''}</tr>
       ${lad.map(l => `<tr class="num ${l.end===d.end?'cur':''}"><td>${l.rd||'—'}</td>
-        <td>${dt(l.end)}</td><td>${eok(l.min)}</td></tr>`).join('')}</table>` : ''}
+        <td>${gm?ymd(l.end.slice(0,8)):dt(l.end)}</td><td>${eok(l.min)}</td>
+        ${gm?`<td>${l.amt?('낙찰 '+eok(l.amt)):(l.rslt==='002'?'유찰':'—')}</td>`:''}</tr>`).join('')}</table>` : ''}
     <h3>이 번지의 실거래 ${hist.length ? `(${hist.length}건 / 최근 2년${sh?' · 전체 1채 기준':''})` : ''}</h3>
     ${hist.length ? `<table><tr><th>거래월</th><th>층</th><th>전용</th><th>거래가</th><th></th></tr>
       ${hist.map(h => `<tr class="num"><td>${h.ym.slice(0,4)}.${h.ym.slice(4)}</td><td>${h.fl||'—'}</td>
@@ -378,7 +463,7 @@ function openSheet(d){
       </table>` : '<div class="empty">같은 번지의 실거래가 없습니다.</div>'}
     <p style="color:var(--muted);font-size:12px;line-height:1.6;margin-top:18px">
       최저입찰가는 <b>지금 진행/예정인 회차</b> 기준입니다. 유찰되면 다음 회차 가격으로 내려갑니다.
-      입찰 전 온비드 원문·등기부를 반드시 확인하세요.</p>`;
+      입찰 전 ${gm?'법원경매정보 원문·등기부':'온비드 원문·등기부'}를 반드시 확인하세요.</p>`;
   $('#sheet').classList.add('on');
   enterOverlay('sheet');
   $('#goMap').onclick = () => { $('#sheet').classList.remove('on'); showMap(d); };
@@ -387,18 +472,19 @@ function openSheet(d){
     b.classList.toggle('on', on); b.textContent = on ? '★' : '☆'; render();
   };
   const cp = $('#copyId');
-  if(cp) cp.onclick = () => { navigator.clipboard?.writeText(d.id||''); cp.textContent = '복사됨 ✓'; };
+  if(cp) cp.onclick = () => { navigator.clipboard?.writeText((gm?d.gCase:d.id)||''); cp.textContent = '복사됨 ✓'; };
 }
 $('#sheet').onclick = e => { if(e.target.id === 'sheet') history.back(); };
 
-/* ── 지도: 가격 말풍선 마커 ── */
+/* ── 지도: 가격 말풍선 마커 (공매/경매 색 구분) ── */
 let map, mapReady = false, pins = [];
 function bubble(d){
   const sh = isShare(d);
-  const hot = !sh && d.gap > 0 && adjDeal(d) && d.min && d.min < adjDeal(d) * 0.8;
+  const gm = isGm(d);
+  const hot = d.gap > 0 && adjDeal(d) && d.min && d.min < adjDeal(d) * 0.8;
   const el = document.createElement('div');
-  el.className = 'pin ' + d.type + (sh ? ' share' : hot ? ' hot' : '');
-  el.innerHTML = `<div class="bub">${(d.min/1e8).toFixed(1)}억${sh ? `<i>지분 ${d.share}</i>` : ''}</div>`;
+  el.className = 'pin ' + (gm ? 'gm ' : '') + d.type + (sh ? ' share' : (hot ? ' hot' : ''));
+  el.innerHTML = `<div class="bub"><em>${gm?'경':'공'}</em>${(d.min/1e8).toFixed(1)}억${sh ? `<i>${d.share}</i>` : ''}</div>`;
   el.onclick = () => openSheet(d);
   return el;
 }
@@ -425,16 +511,14 @@ function initMap(cb){
   s.onerror = () => $('#map').innerHTML = '<div class="empty" style="margin:20px">지도를 불러오지 못했습니다. 카카오 개발자센터 Web 플랫폼 도메인 등록을 확인하세요.</div>';
   document.head.append(s);
 }
-const nav = {list:$('#tabList'), today:$('#tabToday'), fav:$('#tabFav'), map:$('#tabMap')};
-function highlight(k){ Object.values(nav).forEach(b => b.classList.remove('on')); nav[k].classList.add('on'); }
+const navB = {list:$('#tabList'), today:$('#tabToday'), fav:$('#tabFav'), map:$('#tabMap')};
+function highlight(k){ Object.values(navB).forEach(b => b.classList.remove('on')); navB[k].classList.add('on'); }
 
-/* ── 뒤로가기: 시트/지도 오버레이를 브라우저 히스토리에 얹어
-      본래 뒤로가기 버튼이 창을 닫지 않고 한 단계만 돌아가게 함 ── */
 let overlay = null;
 function enterOverlay(kind){
   if(overlay === null) history.pushState({ov:kind}, '');
-  else if(overlay === 'sheet' && kind === 'map') history.replaceState({ov:kind}, ''); // 상세→지도: 대체
-  else history.pushState({ov:kind}, '');                                              // 지도→상세: 누적
+  else if(overlay === 'sheet' && kind === 'map') history.replaceState({ov:kind}, '');
+  else history.pushState({ov:kind}, '');
   overlay = kind;
 }
 function exitMap(){ document.body.classList.remove('mapmode'); highlight(state.view === 'all' ? 'list' : state.view); }
@@ -458,22 +542,24 @@ function showMap(focus){
   });
 }
 function goView(v){
-  if(overlay === 'map'){ history.back(); overlay = null; }   // 지도 히스토리 항목 소비
+  if(overlay === 'map'){ history.back(); overlay = null; }
   document.body.classList.remove('mapmode');
   state.view = v;
   highlight(v === 'all' ? 'list' : v);
   render(); window.scrollTo(0,0);
 }
-nav.list.onclick  = () => goView('all');
-nav.today.onclick = () => goView('today');
-nav.fav.onclick   = () => goView('fav');
-nav.map.onclick   = () => showMap(null);
+navB.list.onclick  = () => goView('all');
+navB.today.onclick = () => goView('today');
+navB.fav.onclick   = () => goView('fav');
+navB.map.onclick   = () => showMap(null);
 
 /* ── 필터 바인딩 (목록·지도 공통) ── */
 function syncUI(){
   $('#gu').value = $('#gu2').value = state.gu;
   $$('[data-t]').forEach(c => c.classList.toggle('on', state.types[c.dataset.t]));
   ['#fShare','#fShare2'].forEach(s => $(s).classList.toggle('warnon', state.noShare));
+  $$('[data-src]').forEach(c => c.classList.toggle('srcon', c.dataset.src === state.src));
+  $$('[data-src2]').forEach(c => c.classList.toggle('srcon', c.dataset.src2 === state.src));
 }
 $('#fBtn').onclick   = () => $('#panel').classList.toggle('on');
 $('#fClose').onclick = () => $('#panel').classList.remove('on');
@@ -490,11 +576,13 @@ $('#sort').onchange = e => { state.sort = e.target.value; render(); };
 $$('[data-t]').forEach(c => c.onclick = () => {
   state.types[c.dataset.t] = !state.types[c.dataset.t]; syncUI(); render();
 });
+$$('[data-src]').forEach(c => c.onclick = () => { state.src = c.dataset.src; syncUI(); render(); });
+$$('[data-src2]').forEach(c => c.onclick = () => { state.src = c.dataset.src2; syncUI(); render(); });
 RANGE.forEach(k => $('#'+k).oninput = e => {
   state[k] = e.target.value === '' ? null : parseFloat(e.target.value); render();
 });
 
-/* ── 엑셀(.xlsx) 추출 : 현재 화면(구·유형·범위·오늘/관심 탭)에 걸린 물건만 ── */
+/* ── 엑셀(.xlsx) 추출 ── */
 function naverMap(d){
   const addr = (d.addr || '').replace(/\s*외\s*\d+\s*필지/, '')
     .split(/\s제?\s*[지B]?\d+\s*층/)[0].replace(/\s*\([^)]*\)\s*$/, '').trim();
@@ -506,6 +594,8 @@ function floorMin(d){
 }
 function scopeName(){
   const p = [];
+  if(state.src === 'gonmae') p.push('공매');
+  if(state.src === 'gm')     p.push('경매');
   if(state.view === 'today') p.push('오늘');
   if(state.view === 'fav')   p.push('관심');
   p.push(state.gu || '서울전체');
@@ -516,27 +606,28 @@ function scopeName(){
 function exportRows(){
   const rows = filtered();
   if(!rows.length){ alert('내보낼 물건이 없습니다. 필터/탭을 확인하세요.'); return; }
-  const head = ['물건명','주소','현재 입찰가','감정평가액','최저입찰가(최종회차)','감정가 대비(%)',
-    '실거래가','실거래 대비 차액','세대수(아파트)','지분 경고','온비드 링크','네이버 지도 링크'];
+  const head = ['구분','물건명','주소','현재 입찰가','감정평가액','최저입찰가(최종회차)','감정가 대비(%)',
+    '실거래가','실거래 대비 차액','낙찰가','세대수','지분 경고','사건/물건번호','네이버 지도 링크'];
   const aoa = [head];
   rows.forEach(d => {
     const fl = floorMin(d);
     aoa.push([
+      isGm(d) ? '경매' : '공매',
       d.name || '', d.addr || '', d.min || '', d.aprs || '', fl || '',
       (d.aprs && fl) ? Math.round(fl / d.aprs * 100) : '',
-      d.deal || '', (d.gap > 0 ? d.gap : ''),
-      d.hh || '', isShare(d) ? ('⚠️ 지분 ' + d.share) : '',
-      onbidUrl(d) || '', naverMap(d)
+      d.deal || '', (d.gap > 0 ? d.gap : ''), d.gMae || '',
+      d.hh || '', isShare(d) ? ('⚠️ ' + d.share) : '',
+      (isGm(d) ? d.gCase : d.id) || '', naverMap(d)
     ]);
   });
-  const fname = `공매_${TODAY || 'export'}_${scopeName()}`;
+  const fname = `물건_${TODAY || 'export'}_${scopeName()}`;
   if(window.XLSX){
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [{wch:18},{wch:42},{wch:13},{wch:13},{wch:16},{wch:11},
-      {wch:13},{wch:14},{wch:11},{wch:12},{wch:32},{wch:32}];
-    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '공매');
+    ws['!cols'] = [{wch:6},{wch:18},{wch:42},{wch:13},{wch:13},{wch:16},{wch:11},
+      {wch:13},{wch:14},{wch:13},{wch:9},{wch:12},{wch:20},{wch:32}];
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '물건');
     XLSX.writeFile(wb, fname + '.xlsx');
-  } else {                                   // CDN 미로딩 시 CSV 폴백
+  } else {
     const csv = '\ufeff' + aoa.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
@@ -545,6 +636,7 @@ function exportRows(){
 }
 $('#xlsx').onclick = exportRows;
 
+syncUI();
 render();
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>
