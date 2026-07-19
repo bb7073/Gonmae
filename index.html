@@ -28,6 +28,11 @@ select,.chip,input{background:var(--surface2);color:var(--text);border:1px solid
 .chip.on{background:var(--accent);color:#101317;border-color:var(--accent);font-weight:700}
 .chip.warnon{background:var(--warn);color:#1A0E10;border-color:var(--warn);font-weight:700}
 .chip.srcon{background:var(--gm);color:#161022;border-color:var(--gm);font-weight:700}
+.chip.underon,#mapbar .chip.underon{background:var(--accent);color:#101317;border-color:var(--accent);font-weight:700}
+/* 종류 필터칩 = 지도 마커 색과 동일(범례 겸용). 글자색은 대비 높은 쪽 선택 */
+.chip.on[data-t="apt"],#mapbar .chip.on[data-t="apt"]{background:var(--apt);border-color:var(--apt);color:#0B0B0B}
+.chip.on[data-t="villa"],#mapbar .chip.on[data-t="villa"]{background:var(--villa);border-color:var(--villa);color:#0B0B0B}
+.chip.on[data-t="etc"],#mapbar .chip.on[data-t="etc"]{background:#5A6672;border-color:#5A6672;color:#fff}
 #panel{display:none;padding:12px 14px 4px;border-bottom:1px solid var(--line);background:var(--surface)}
 #panel.on{display:block}
 .frow{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:13px}
@@ -141,6 +146,7 @@ tr.cur td{color:var(--accent);font-weight:700}
     <button class="chip on" data-t="villa">빌라</button>
     <button class="chip on" data-t="etc">기타</button>
     <button class="chip" id="fShare">지분 제외</button>
+    <button class="chip" id="fUnder">실거래 20%↓</button>
   </div>
 </header>
 
@@ -187,17 +193,10 @@ tr.cur td{color:var(--accent);font-weight:700}
     <button class="chip on" data-t="villa">빌라</button>
     <button class="chip on" data-t="etc">기타</button>
     <button class="chip" id="fShare2">지분 제외</button>
+    <button class="chip" id="fUnder2">실거래 20%↓</button>
     <button class="chip" id="mapCnt" style="pointer-events:none"></button>
   </div>
   <div id="map"></div>
-  <div id="maplegend">
-    <span><i class="lg apt"></i>아파트</span>
-    <span><i class="lg villa"></i>빌라</span>
-    <span><i class="lg etc"></i>기타</span>
-    <span><i class="lg share"></i>지분</span>
-    <span><i class="lg hot"></i>실거래 20%↓</span>
-    <span class="lgnote">경=경매 · 공=공매</span>
-  </div>
 </div>
 
 <nav>
@@ -298,10 +297,11 @@ const isGm = d => d.src === 'gm';
 const isShare = d => !!d.share;
 const effArea = d => +d.fullArea || +d.area || 0;
 const adjDeal = d => d.dealAdj || d.deal || 0;
+const isUnder = d => { const a = adjDeal(d); return !!(a && d.min && d.min < a * 0.8); };  // 실거래(환산) 대비 20%+ 저렴
 
 const RANGE = ['p1','p2','v1','v2','a1','a2','f1','f2','d1','d2'];
 const blank = () => Object.fromEntries(RANGE.map(k => [k, null]));
-let state = {sort:'gap', gu:'', view:'all', src:'all', types:{apt:true, villa:true, etc:true}, noShare:false, ...blank()};
+let state = {sort:'gap', gu:'', view:'all', src:'all', types:{apt:true, villa:true, etc:true}, noShare:false, under:false, ...blank()};
 
 [...new Set(D.map(d => d.gu))].filter(Boolean).sort().forEach(g => {
   ['#gu','#gu2'].forEach(sel => {
@@ -325,6 +325,7 @@ function filtered(){
     if(state.gu && d.gu !== state.gu) return false;
     if(!state.types[d.type]) return false;
     if(state.noShare && isShare(d)) return false;
+    if(state.under && !isUnder(d)) return false;
     if(!rng((d.min||0)/1e8,  state.p1, state.p2)) return false;
     if(!rng((d.aprs||0)/1e8, state.v1, state.v2)) return false;
     if(!rng(effArea(d),      state.a1, state.a2)) return false;
@@ -497,9 +498,10 @@ function openSheet(d){
   if(cp) cp.onclick = () => { navigator.clipboard?.writeText((gm?d.gCase:d.id)||''); cp.textContent = '복사됨 ✓'; };
   const cg = $('#courtGo');
   if(cg) cg.onclick = () => {
-    const no = (d.gCase || d.id || '').trim();
+    const raw = (d.gCase || d.id || '').trim();
+    const no = (raw.split('타경')[1] || raw).trim();   // ★법원사이트 입력칸용: '타경' 뒤 숫자만
     try { navigator.clipboard?.writeText(no); } catch(_){}
-    cg.textContent = '사건번호 복사됨 ✓ 여는 중…';
+    cg.textContent = `사건번호 ${no} 복사됨 ✓ 여는 중…`;
     window.open(courtUrl(), '_blank');
     setTimeout(() => { cg.textContent = '법원경매 바로가기'; }, 2500);
   };
@@ -511,10 +513,9 @@ let map, mapReady = false, pins = [];
 function bubble(d){
   const sh = isShare(d);
   const gm = isGm(d);
-  const hot = d.gap > 0 && adjDeal(d) && d.min && d.min < adjDeal(d) * 0.8;
   const el = document.createElement('div');
-  // 색은 공매·경매 공통으로 종류(아파트/빌라/기타)·지분·hot 기준. 공/경은 라벨로만 구분.
-  el.className = 'pin ' + d.type + (sh ? ' share' : (hot ? ' hot' : ''));
+  // 색은 종류(아파트 파랑/빌라 초록/기타 회색) + 지분(빨강) 4가지로만 고정. 저평가는 필터로 분리.
+  el.className = 'pin ' + (sh ? 'share' : d.type);
   el.innerHTML = `<div class="bub"><em>${gm?'경':'공'}</em>${(d.min/1e8).toFixed(1)}억${sh ? `<i>${d.share}</i>` : ''}</div>`;
   el.onclick = () => openSheet(d);
   return el;
@@ -589,13 +590,14 @@ function syncUI(){
   $('#gu').value = $('#gu2').value = state.gu;
   $$('[data-t]').forEach(c => c.classList.toggle('on', state.types[c.dataset.t]));
   ['#fShare','#fShare2'].forEach(s => $(s).classList.toggle('warnon', state.noShare));
+  ['#fUnder','#fUnder2'].forEach(s => $(s).classList.toggle('underon', state.under));
   $$('[data-src]').forEach(c => c.classList.toggle('srcon', c.dataset.src === state.src));
   $$('[data-src2]').forEach(c => c.classList.toggle('srcon', c.dataset.src2 === state.src));
 }
 $('#fBtn').onclick   = () => $('#panel').classList.toggle('on');
 $('#fClose').onclick = () => $('#panel').classList.remove('on');
 $('#fReset').onclick = () => {
-  state = {...state, gu:'', types:{apt:true,villa:true,etc:true}, noShare:false, ...blank()};
+  state = {...state, gu:'', types:{apt:true,villa:true,etc:true}, noShare:false, under:false, ...blank()};
   RANGE.forEach(k => $('#'+k).value = '');
   syncUI(); render();
 };
@@ -603,6 +605,9 @@ $('#sort').onchange = e => { state.sort = e.target.value; render(); };
 ['#gu','#gu2'].forEach(sel => $(sel).onchange = e => { state.gu = e.target.value; syncUI(); render(); });
 ['#fShare','#fShare2'].forEach(sel => $(sel).onclick = () => {
   state.noShare = !state.noShare; syncUI(); render();
+});
+['#fUnder','#fUnder2'].forEach(sel => $(sel).onclick = () => {
+  state.under = !state.under; syncUI(); render();
 });
 $$('[data-t]').forEach(c => c.onclick = () => {
   state.types[c.dataset.t] = !state.types[c.dataset.t]; syncUI(); render();
