@@ -256,15 +256,24 @@ function gmToGonmae(g){
   };
 }
 
-const G_ON = (typeof window.GONMAE !== 'undefined' && window.GONMAE) ? window.GONMAE : [];
-const G_GM = (typeof window.GYEONGMAE !== 'undefined' && window.GYEONGMAE) ? window.GYEONGMAE : [];
+function asArray(x){
+  if(!x) return [];
+  if(Array.isArray(x)) return x;
+  if(Array.isArray(x.items)) return x.items;   // {updated,count,items:[...]}
+  if(Array.isArray(x.list))  return x.list;
+  if(Array.isArray(x.data))  return x.data;
+  return [];
+}
+const G_ON = asArray(typeof window.GONMAE    !== 'undefined' ? window.GONMAE    : null);
+const G_GM = asArray(typeof window.GYEONGMAE !== 'undefined' ? window.GYEONGMAE : null);
 const D = [
   ...G_ON.map(d => ({...d, src: d.src || 'gonmae', type: d.type || (d.isApt ? 'apt' : 'villa')})),
   ...G_GM.map(gmToGonmae)
 ];
 
 /* 오늘의 매물 / 관심(즐겨찾기) */
-const TODAY = ((window.GONMAE_AT || window.GYEONGMAE_AT || '') + '').slice(0,10);
+const GM_AT = (typeof window.GYEONGMAE === 'object' && window.GYEONGMAE && window.GYEONGMAE.updated) ? window.GYEONGMAE.updated : (window.GYEONGMAE_AT || '');
+const TODAY = ((window.GONMAE_AT || GM_AT || '') + '').slice(0,10);
 const isNew = d => d.first && d.first === TODAY;
 const FAVKEY = 'gonmae_fav';
 let favs = new Set((()=>{ try{ return JSON.parse(localStorage.getItem(FAVKEY)||'[]'); }catch(_){ return []; } })());
