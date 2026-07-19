@@ -455,7 +455,7 @@ function openSheet(d){
     </dl>
     <div class="btns">
       <button class="primary" id="goMap">지도에서 보기</button>
-      ${gm ? `<button id="copyId">사건번호 복사</button>`
+      ${gm ? `<button id="courtGo">법원경매 바로가기</button>`
             : (url ? `<a href="${url}" target="_blank">온비드 물건보기</a>`
                    : `<button id="copyId">물건번호 복사</button>`)}
       <a href="https://map.kakao.com/link/map/${q},${d.lat},${d.lng}" target="_blank">카카오맵</a>
@@ -487,6 +487,14 @@ function openSheet(d){
   };
   const cp = $('#copyId');
   if(cp) cp.onclick = () => { navigator.clipboard?.writeText((gm?d.gCase:d.id)||''); cp.textContent = '복사됨 ✓'; };
+  const cg = $('#courtGo');
+  if(cg) cg.onclick = () => {
+    const no = (d.gCase || d.id || '').trim();
+    try { navigator.clipboard?.writeText(no); } catch(_){}
+    cg.textContent = '사건번호 복사됨 ✓ 여는 중…';
+    window.open(courtUrl(), '_blank');
+    setTimeout(() => { cg.textContent = '법원경매 바로가기'; }, 2500);
+  };
 }
 $('#sheet').onclick = e => { if(e.target.id === 'sheet') history.back(); };
 
