@@ -225,8 +225,13 @@ function normType(t, usg){
 }
 
 /* 경매 1건 → 공매 카드 스키마로 흡수 */
+function guFromAddr(addr){
+  const m = (addr || '').match(/(\S+?[구군])(\s|$)/);
+  return m ? m[1] : '';
+}
 function gmToGonmae(g){
   const type = normType(g.kind, g.usg);
+  const gu = g.gu || guFromAddr(g.addr);
   const disc = (g.lowRate != null) ? Math.round(g.lowRate)
              : (g.gaman && g.low ? Math.round(g.low / g.gaman * 100) : null);
   const ladder = (g.ladder || []).map(l => ({
@@ -237,7 +242,7 @@ function gmToGonmae(g){
     src: 'gm',
     id: g.caseNo || (g.court + '_' + (g.saNo||'') + '_' + (g.gdsSeq||'')),
     type, use: g.usg || TN[type],
-    name: g.name || g.addr, addr: g.addr, gu: g.gu,
+    name: g.name || g.addr, addr: g.addr, gu: gu,
     lat: g.lat, lng: g.lng,
     min: g.low, aprs: g.gaman, disc,
     area: g.area, fullArea: null,
@@ -492,7 +497,8 @@ function bubble(d){
   const gm = isGm(d);
   const hot = d.gap > 0 && adjDeal(d) && d.min && d.min < adjDeal(d) * 0.8;
   const el = document.createElement('div');
-  el.className = 'pin ' + (gm ? 'gm ' : '') + d.type + (sh ? ' share' : (hot ? ' hot' : ''));
+  // 색은 공매·경매 공통으로 종류(아파트/빌라/기타)·지분·hot 기준. 공/경은 라벨로만 구분.
+  el.className = 'pin ' + d.type + (sh ? ' share' : (hot ? ' hot' : ''));
   el.innerHTML = `<div class="bub"><em>${gm?'경':'공'}</em>${(d.min/1e8).toFixed(1)}억${sh ? `<i>${d.share}</i>` : ''}</div>`;
   el.onclick = () => openSheet(d);
   return el;
