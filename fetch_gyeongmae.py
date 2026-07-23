@@ -272,6 +272,7 @@ def process_one(s, r):
     jibun_flag = is_jibun_sale(r, special)
     deal = deal_adj = deal_avg = gap = None
     hist = []
+    apt_nm = ""
     gu   = (r.get("hjguSigu") or "").strip()
     umd  = (r.get("hjguDong") or "").strip()
     jibun = (r.get("daepyoLotno") or "").strip()
@@ -282,6 +283,10 @@ def process_one(s, r):
             h = DC.deal_history(lawd, umd, jibun, bldg, area)
             hist = [{"ym": x["ym"], "amt": x["amt"] * 10000,
                      "area": x["area"], "fl": x["floor"]} for x in h]
+            for x in h:                     # 실거래 레코드에서 단지명 복원
+                nm = (x.get("name") or x.get("aptNm") or "").strip()
+                if nm:
+                    apt_nm = nm; break
             if h:
                 deal = h[0]["amt"] * 10000                      # 최근 실거래(전체 1채)
                 deal_avg = int(sum(x["amt"] for x in h) / len(h) * 10000)
@@ -298,7 +303,8 @@ def process_one(s, r):
         "caseNo": r.get("srnSaNo"),
         "saNo": sa_no, "gdsSeq": gds_seq, "boCd": court,
         "kind": kind, "usg": r.get("dspslUsgNm",""),
-        "name": (r.get("buldList") or r.get("printSt") or "").strip(),
+        "name": ((apt_nm + " " + (r.get("buldList") or r.get("printSt") or "")).strip()
+                 if apt_nm else (r.get("buldList") or r.get("printSt") or "").strip()),
         "addr": addr, "road": road,
         "gyae": r.get("jpDeptNm",""),
         "lat": geo["lat"] if geo else None,
