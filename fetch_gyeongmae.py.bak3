@@ -308,12 +308,6 @@ def process_one(s, r):
 
     addr, road = build_addr(r)
     geo = geocode(addr) or (geocode(road) if road else None)
-    if isinstance(geo, (list, tuple)):
-        geo = {"lat": float(geo[0]), "lng": float(geo[1]), "lon": float(geo[1])} if len(geo) >= 2 else None
-    elif isinstance(geo, dict):
-        if "lng" not in geo and "lon" in geo: geo["lng"] = geo["lon"]
-        if "lon" not in geo and "lng" in geo: geo["lon"] = geo["lng"]
-        if "lat" not in geo: geo = None
 
     gaman = int(r.get("gamevalAmt") or 0)
     lowp  = int(r.get("minmaePrice") or 0)
