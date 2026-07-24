@@ -16,7 +16,7 @@ fetch_gyeongmae.py  v2
   python fetch_gyeongmae.py            # 전체 수집
   python fetch_gyeongmae.py --court B000210 --pages 1   # 빠른 테스트
 """
-import sys, os, re, json, time, argparse, datetime, threading
+import sys, os, re, json, time, argparse, datetime, threading, base64, hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.stdout.reconfigure(line_buffering=True)
@@ -237,6 +237,57 @@ def parse_share_ratio(r, special):
         except Exception: pass
     return None
 
+# 사진 추출: 법원 상세 응답에 base64로 박혀오는 이미지를 jpg로 저장
+PHOTO_DIR  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "photos")
+MAX_PHOTOS = 1
+MIN_IMG_KB = 8
+JPG_MAGIC  = bytes.fromhex("ffd8")
+PNG_MAGIC  = bytes.fromhex("89504e470d0a1a0a")
+_B64_RE    = re.compile("^[A-Za-z0-9+/]{500,}={0,2}$")
+
+def _walk_strings(o):
+    if isinstance(o, dict):
+        for v in o.values(): yield from _walk_strings(v)
+    elif isinstance(o, list):
+        for v in o: yield from _walk_strings(v)
+    elif isinstance(o, str):
+        yield o
+
+def extract_photos(detail, key):
+    if not detail: return []
+    key = re.sub("[^0-9A-Za-z가-힣_-]", "_", str(key or "x"))[:40]
+    try:
+        exist = sorted(fn for fn in os.listdir(PHOTO_DIR) if fn.startswith(key + "_"))
+    except FileNotFoundError:
+        exist = []
+    if exist:
+        return ["photos/" + fn for fn in exist[:MAX_PHOTOS]]
+    saved, seen = [], set()
+    for raw_s in _walk_strings(detail):
+        t = raw_s.strip()
+        if t.startswith("data:image"): t = t.split(",", 1)[-1]
+        t = "".join(t.split())
+        if len(t) < 500 or not _B64_RE.match(t): continue
+        try: blob = base64.b64decode(t + "=" * (-len(t) % 4))
+        except Exception: continue
+        if   blob[:2] == JPG_MAGIC: ext = ".jpg"
+        elif blob[:8] == PNG_MAGIC: ext = ".png"
+        else: continue
+        if len(blob) < MIN_IMG_KB * 1024: continue
+        h = hashlib.md5(blob).hexdigest()[:8]
+        if h in seen: continue
+        seen.add(h)
+        os.makedirs(PHOTO_DIR, exist_ok=True)
+        fn = key + "_" + str(len(saved) + 1) + ext
+        try:
+            with open(os.path.join(PHOTO_DIR, fn), "wb") as fp: fp.write(blob)
+        except Exception as e:
+            print("  [사진저장 실패]", fn, e); continue
+        saved.append("photos/" + fn)
+        if len(saved) >= MAX_PHOTOS: break
+    return saved
+
+
 def process_one(s, r):
     kind = kind_of(r.get("dspslUsgNm",""))
     if not kind:
@@ -246,9 +297,11 @@ def process_one(s, r):
     gds_seq = r.get("mokmulSer") or r.get("maemulSer") or "1"
 
     ladder, sold_amt, special = [], 0, ""
+    photos = []
     try:
         dm = fetch_detail(s, court, sa_no, gds_seq)
         ladder, sold_amt, special = parse_ladder(dm)
+        photos = extract_photos(dm, r.get("srnSaNo") or str(sa_no) + "_" + str(gds_seq))
     except Exception as e:
         print(f"[상세 실패] {r.get('srnSaNo')} {e}")
     time.sleep(SLEEP)
@@ -283,7 +336,7 @@ def process_one(s, r):
             h = DC.deal_history(lawd, umd, jibun, bldg, area)
             hist = [{"ym": x["ym"], "amt": x["amt"] * 10000,
                      "area": x["area"], "fl": x["floor"]} for x in h]
-            for x in h:                     # 실거래 레코드에서 단지명 복원
+            for x in h:
                 nm = (x.get("name") or x.get("aptNm") or "").strip()
                 if nm:
                     apt_nm = nm; break
@@ -303,8 +356,7 @@ def process_one(s, r):
         "caseNo": r.get("srnSaNo"),
         "saNo": sa_no, "gdsSeq": gds_seq, "boCd": court,
         "kind": kind, "usg": r.get("dspslUsgNm",""),
-        "name": ((apt_nm + " " + (r.get("buldList") or r.get("printSt") or "")).strip()
-                 if apt_nm else (r.get("buldList") or r.get("printSt") or "").strip()),
+        "name": ((apt_nm + " " + (r.get("buldList") or r.get("printSt") or "")).strip() if apt_nm else (r.get("buldList") or r.get("printSt") or "").strip()),
         "addr": addr, "road": road,
         "gyae": r.get("jpDeptNm",""),
         "lat": geo["lat"] if geo else None,
@@ -325,6 +377,8 @@ def process_one(s, r):
         "dealAvg": deal_avg,
         "gap": gap,              # 실거래(환산) - 최저가
         "hist": hist,
+        "photo": photos[0] if photos else None,
+        "photos": photos,
     }
 
 def crawl():
