@@ -257,7 +257,7 @@ function gmToGonmae(g){
     deal: g.deal, dealAdj: g.dealAdj, dealAvg: g.dealAvg, gap: g.gap,
     hist: g.hist || [], ladder,
     share: g.jibun ? '지분' : null, shareRaw: g.jibun || '',
-    thumb: null, hh: null,
+    thumb: g.photo || (g.photos && g.photos[0]) || null, hh: null,
     end: g.saleDate ? String(g.saleDate) + '0000' : '',
     bgn: '', status: g.maeAmt ? '매각(낙찰)' : '진행중',
     first: g.first || null,
@@ -487,9 +487,14 @@ function openSheet(d){
     <p style="color:var(--muted);font-size:12px;line-height:1.6;margin-top:18px">
       최저입찰가는 <b>지금 진행/예정인 회차</b> 기준입니다. 유찰되면 다음 회차 가격으로 내려갑니다.
       입찰 전 ${gm?'법원경매정보 원문·등기부':'온비드 원문·등기부'}를 반드시 확인하세요.</p>`;
-  $('#sheet').classList.add('on');
-  enterOverlay('sheet');
-  $('#goMap').onclick = () => { $('#sheet').classList.remove('on'); showMap(d); };
+  pushOverlay('sheet');
+  $('#goMap').onclick = () => {
+    if(ovStack.includes('map')){        // 지도 위에서 연 상세 → 시트만 닫아 지도 복귀 + 해당 물건으로 이동
+      history.back();
+      initMap(() => { map.relayout(); map.setLevel(3);
+        map.setCenter(new kakao.maps.LatLng(d.lat, d.lng)); drawPins(); });
+    } else showMap(d);                  // 목록에서 연 상세 → 시트를 지도로 교체
+  };
   $('#shStar').onclick = () => {
     toggleFav(d); const on = isFav(d), b = $('#shStar');
     b.classList.toggle('on', on); b.textContent = on ? '★' : '☆'; render();
@@ -546,27 +551,26 @@ function initMap(cb){
 const navB = {list:$('#tabList'), today:$('#tabToday'), fav:$('#tabFav'), map:$('#tabMap')};
 function highlight(k){ Object.values(navB).forEach(b => b.classList.remove('on')); navB[k].classList.add('on'); }
 
-let overlay = null;
-function enterOverlay(kind){
-  if(overlay === null) history.pushState({ov:kind}, '');
-  else if(overlay === 'sheet' && kind === 'map') history.replaceState({ov:kind}, '');
-  else history.pushState({ov:kind}, '');
-  overlay = kind;
+/* ovStack: 열린 오버레이 스택. []=목록 / ['map'] / ['map','sheet'] / ['sheet']
+   오버레이 하나 열 때 pushState 1개. 뒤로가기(popstate)=맨 위 1개만 닫기.
+   지도 객체는 파괴하지 않으므로 시트를 닫으면 보던 위치·확대율이 그대로 복원된다. */
+let ovStack = [];
+function applyOverlay(){
+  const top = ovStack[ovStack.length - 1] || null;
+  document.body.classList.toggle('mapmode', ovStack.includes('map'));
+  $('#sheet').classList.toggle('on', top === 'sheet');
+  highlight(ovStack.includes('map') ? 'map' : (state.view === 'all' ? 'list' : state.view));
 }
-function exitMap(){ document.body.classList.remove('mapmode'); highlight(state.view === 'all' ? 'list' : state.view); }
-window.addEventListener('popstate', () => {
-  if($('#sheet').classList.contains('on')){
-    $('#sheet').classList.remove('on');
-    overlay = document.body.classList.contains('mapmode') ? 'map' : null; return;
-  }
-  if(document.body.classList.contains('mapmode')){ exitMap(); overlay = null; return; }
-  overlay = null;
-});
+function pushOverlay(kind){ ovStack.push(kind); history.pushState({ov:ovStack.slice()}, ''); applyOverlay(); }
+window.addEventListener('popstate', () => { ovStack.pop(); applyOverlay(); });
+function closeToList(){ if(ovStack.length){ const n = ovStack.length; ovStack = []; history.go(-n); } else applyOverlay(); }
 
 function showMap(focus){
-  enterOverlay('map');
-  document.body.classList.add('mapmode');
-  highlight('map');
+  if(!ovStack.includes('map')){
+    if(ovStack[ovStack.length - 1] === 'sheet'){   // 목록에서 연 시트 → 지도로 교체
+      ovStack[ovStack.length - 1] = 'map'; history.replaceState({ov:ovStack.slice()}, ''); applyOverlay();
+    } else pushOverlay('map');
+  }
   initMap(() => {
     map.relayout();
     if(focus){ map.setLevel(3); map.setCenter(new kakao.maps.LatLng(focus.lat, focus.lng)); }
@@ -574,8 +578,7 @@ function showMap(focus){
   });
 }
 function goView(v){
-  if(overlay === 'map'){ history.back(); overlay = null; }
-  document.body.classList.remove('mapmode');
+  closeToList();
   state.view = v;
   highlight(v === 'all' ? 'list' : v);
   render(); window.scrollTo(0,0);
