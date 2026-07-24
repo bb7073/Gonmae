@@ -387,6 +387,7 @@ def crawl():
     max_pages = crawl.max_pages
     for court, cname in COURTS.items():
         print(f"\n===== {cname} ({court}) =====")
+        s = new_session()
         try:
             rows, total = fetch_list(s, court, 1)
         except Exception as e:
@@ -418,7 +419,7 @@ def crawl():
                     o = f.result()
                     if o: picked.append(o)
                 except Exception as e:
-                    print("  [처리 예외]", e)
+                    import traceback; print("  [처리 예외]", e); traceback.print_exc()
     save_geo()
     return picked
 crawl.max_pages = None
