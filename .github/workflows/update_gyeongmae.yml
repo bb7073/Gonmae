@@ -3,7 +3,7 @@ name: update-gyeongmae
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * *'   # 매일 09:00 KST (00:00 UTC)
+    - cron: '0 23 * * *'   # 매일 08:00 KST (23:00 UTC)
 
 permissions:
   contents: write
