@@ -18,7 +18,9 @@
   --tagapt-bg:#24384A;--tagapt-fg:#8FC7FF;--tagvilla-bg:#1F3A2C;--tagvilla-fg:#7FE0AC;
   --tagwarn-bg:#3A2226;--tagwarn-fg:#FF9E97;--tagsg-bg:#2E2A18;--tagsg-fg:#FFD98A;
   --taggm-bg:#2E2452;--taggm-fg:#CDB4FF;--tagnew-bg:#3A2A12;
-  --starfg:#5A6672;--starbg:rgba(0,0,0,.28);--sheetdim:rgba(0,0,0,.6)}
+  --starfg:#5A6672;--starbg:rgba(0,0,0,.28);--sheetdim:rgba(0,0,0,.6);
+  --zone:#FF8A3D;--tagzone-bg:#3A2415;--tagzone-fg:#FFB47A;
+  --zonebg:#33210F;--zoneborder:#5E3C1C;--zonetext:#FFD1A8;--zoneb:#FFB47A}
 body.light{--bg:#F5F6F8;--surface:#FFFFFF;--surface2:#EFF1F4;--line:#E1E4E8;
   --text:#1A1F26;--muted:#6B7684;--good:#1E9E6C;--warn:#E0453C;
   --hdrbg:rgba(255,255,255,.94);--navbg:rgba(255,255,255,.96);--barbg:rgba(255,255,255,.95);--barshadow:0 2px 8px rgba(0,0,0,.1);
@@ -27,7 +29,9 @@ body.light{--bg:#F5F6F8;--surface:#FFFFFF;--surface2:#EFF1F4;--line:#E1E4E8;
   --tagapt-bg:#E3F0FF;--tagapt-fg:#1D6FBD;--tagvilla-bg:#E3F8ED;--tagvilla-fg:#17915A;
   --tagwarn-bg:#FFE5E3;--tagwarn-fg:#C23B32;--tagsg-bg:#FFF3D6;--tagsg-fg:#A67200;
   --taggm-bg:#F1EAFB;--taggm-fg:#6B4FA0;--tagnew-bg:#FFF3D6;
-  --starfg:#8A94A0;--starbg:rgba(255,255,255,.7);--sheetdim:rgba(0,0,0,.4)}
+  --starfg:#8A94A0;--starbg:rgba(255,255,255,.7);--sheetdim:rgba(0,0,0,.4);
+  --zone:#E06A15;--tagzone-bg:#FFEEDF;--tagzone-fg:#B85A11;
+  --zonebg:#FFF4EA;--zoneborder:#F0CFAF;--zonetext:#8A4A0C;--zoneb:#B85A11}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{margin:0;background:var(--bg);color:var(--text);
   font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Noto Sans KR",sans-serif;
@@ -135,6 +139,19 @@ tr.cur td{color:var(--accent);font-weight:700}
   background:var(--starbg);border:0;cursor:pointer;line-height:1;padding:0}
 .star.on{color:var(--accent)}
 .tag.new{background:var(--tagnew-bg);color:var(--accent);font-weight:800}
+.tag.zone{background:var(--tagzone-bg);color:var(--tagzone-fg);font-weight:700}
+.chip.zoneon,#mapbar .chip.zoneon{background:var(--zone);color:#fff;border-color:var(--zone);font-weight:700}
+.zonebox{background:var(--zonebg);border:1px solid var(--zoneborder);border-radius:12px;padding:11px 12px;
+  font-size:13px;line-height:1.55;color:var(--zonetext);margin:14px 0 0}
+.zonebox b{color:var(--zoneb)}
+#zoneLegend{display:none;position:absolute;left:10px;right:10px;bottom:10px;z-index:5;
+  background:var(--barbg);box-shadow:var(--barshadow);border:1px solid var(--line);
+  border-radius:12px;padding:8px 10px;font-size:11px;color:var(--text);
+  gap:4px 12px;flex-wrap:wrap;align-items:center}
+body.zonelayer #zoneLegend{display:flex}
+#zoneLegend span{display:flex;align-items:center;gap:5px;white-space:nowrap}
+#zoneLegend i{width:11px;height:11px;border-radius:3px;display:inline-block;opacity:.85}
+#zoneLegend b{margin-left:auto;color:var(--muted);font-weight:600}
 .sheetstar{float:right;font-size:24px;color:var(--starfg);background:none;border:0;cursor:pointer;
   margin:-2px -4px 0 0;line-height:1}
 .sheetstar.on{color:var(--accent)}
@@ -168,6 +185,7 @@ tr.cur td{color:var(--accent);font-weight:700}
     <button class="chip on" data-t="etc">기타</button>
     <button class="chip" id="fShare">지분 제외</button>
     <button class="chip" id="fUnder">실거래 20%↓</button>
+    <button class="chip" id="fZone">🏗 정비구역</button>
   </div>
 </header>
 
@@ -218,7 +236,16 @@ tr.cur td{color:var(--accent);font-weight:700}
     <button class="chip on" data-t="etc">기타</button>
     <button class="chip" id="fShare2">지분 제외</button>
     <button class="chip" id="fUnder2">실거래 20%↓</button>
+    <button class="chip" id="fZone2">🏗</button>
+    <button class="chip" id="zLayer">🗺 구역표시</button>
     <button class="chip" id="mapCnt" style="pointer-events:none"></button>
+  </div>
+  <div id="zoneLegend">
+    <span><i style="background:#FF8A3D"></i>재개발·재건축</span>
+    <span><i style="background:#FFC24B"></i>가로·자율주택</span>
+    <span><i style="background:#B98CFF"></i>뉴타운(촉진)</span>
+    <span><i style="background:#8B98A5"></i>기타개발</span>
+    <b id="zoneHint"></b>
   </div>
   <div id="map"></div>
 </div>
@@ -290,6 +317,7 @@ function gmToGonmae(g){
     end: g.saleDate ? String(g.saleDate) + '0000' : '',
     bgn: '', status: g.maeAmt ? '매각(낙찰)' : '진행중',
     first: g.first || null,
+    zone: g.zone || null, zoneCat: g.zoneCat || null, zoneSub: g.zoneSub || null,
     // 경매 원본 보존
     gCourt: g.court, gGyae: g.gyae, gCase: g.caseNo || g.srnSaNo,
     gSale: g.saleDate, gDecide: g.decideDate, gMae: g.maeAmt,
@@ -330,7 +358,7 @@ const isUnder = d => { const a = adjDeal(d); return !!(a && d.min && d.min < a *
 
 const RANGE = ['p1','p2','v1','v2','a1','a2','f1','f2','d1','d2'];
 const blank = () => Object.fromEntries(RANGE.map(k => [k, null]));
-let state = {sort:'gap', gu:'', view:'all', src:'all', types:{apt:true, villa:true, etc:true}, noShare:false, under:false, newonly:false, areaUnit:'m2', ...blank()};
+let state = {sort:'gap', gu:'', view:'all', src:'all', types:{apt:true, villa:true, etc:true}, noShare:false, under:false, newonly:false, zoneonly:false, zonelayer:false, areaUnit:'m2', ...blank()};
 
 [...new Set(D.map(d => d.gu))].filter(Boolean).sort().forEach(g => {
   ['#gu','#gu2'].forEach(sel => {
@@ -356,6 +384,7 @@ function filtered(){
     if(!state.types[d.type]) return false;
     if(state.noShare && isShare(d)) return false;
     if(state.under && !isUnder(d)) return false;
+    if(state.zoneonly && !d.zone) return false;
     if(!rng((d.min||0)/1e8,  state.p1, state.p2)) return false;
     if(!rng((d.aprs||0)/1e8, state.v1, state.v2)) return false;
     const AU = state.areaUnit === 'py' ? PY : 1;
@@ -394,7 +423,7 @@ function render(){
       ${d.thumb ? `<img class="thumb" src="${d.thumb}" loading="lazy" onerror="this.style.visibility='hidden'">` : '<div class="thumb"></div>'}
       <div class="info">
         <div class="line1">${isNew(d) ? '<span class="tag new">NEW</span>' : ''}${srcTag(d)}<span class="tag ${d.type}">${d.use || TN[d.type]}</span>
-          ${isShare(d) ? `<span class="tag warn">⚠ ${d.share}</span>` : ''}<span>${d.gu}</span>
+          ${isShare(d) ? `<span class="tag warn">⚠ ${d.share}</span>` : ''}${d.zone ? `<span class="tag zone">🏗 ${d.zoneSub || '정비구역'}</span>` : ''}<span>${d.gu}</span>
           ${d.fail ? `<span>· 유찰 ${d.fail}회</span>` : ''}${d.hh ? `<span>· ${d.hh}세대</span>` : ''}</div>
         <div class="nm">${d.name || d.addr}</div>
         <div class="addr">${d.addr}</div>
@@ -460,6 +489,13 @@ function openSheet(d){
       ${d.gSpecial ? `<small>특별매각조건: ${d.gSpecial}</small>` : ''}
     </div>` : '';
 
+  const zoneBox = d.zone ? `
+    <div class="zonebox">
+      <b>🏗 정비구역 내 물건</b><br>
+      <b>${d.zone}</b>${d.zoneSub ? ` · ${d.zoneSub}` : ''}
+      <small>구역 경계는 서울시 의제처리구역(UPIS) 기준이며 참고용입니다. 조합원 지위 승계·분담금 등은 반드시 별도 확인하세요.</small>
+    </div>` : '';
+
   const aptRows = d.hh ? `
       <dt>단지</dt><dd>${d.kaptName || d.name}</dd>
       <dt>세대수 / 동수</dt><dd style="color:var(--apt)">${d.hh}세대 / ${d.dong || '—'}개동</dd>
@@ -472,7 +508,7 @@ function openSheet(d){
     <button class="sheetstar ${isFav(d)?'on':''}" id="shStar">${isFav(d)?'★':'☆'}</button>
     <h2 style="font-size:19px;margin:14px 0 4px">${d.name || d.addr}${sh?` <span style="color:var(--warn);font-size:14px">· ${d.share}</span>`:''}</h2>
     <div style="font-size:13px;color:var(--muted)">${srcTag(d).replace(/<[^>]+>/g,m=>m)} ${d.addr}</div>
-    ${gmBox}
+    ${gmBox}${zoneBox}
     ${shareBox}
     <dl class="kv num">
       <dt>최저입찰가 (현재 회차)</dt><dd style="color:var(--accent);font-size:17px">${eok(d.min)}</dd>
@@ -566,7 +602,85 @@ function drawPins(){
     ov.setMap(map); pins.push(ov);
   });
   $('#mapCnt').textContent = `화면 ${rows.length}건`;
+  drawZones();
 }
+
+/* ══ 정비구역 폴리곤 레이어 ══
+   - jeongbi_map.js는 레이어를 켤 때 1회만 지연 로드(약 260KB gzip)
+   - 확대레벨 6 이하 + 화면 범위 안에 있는 구역만 그림(전역 2970개를 한 번에 그리면 멈춤)
+   - 좌표는 이미 WGS84(위경도)라 별도 변환 불필요 */
+const ZCOLOR = {정비:'#FF8A3D', 소규모:'#FFC24B', 촉진:'#B98CFF', 기타:'#8B98A5'};
+let zonePolys = [], zoneLoading = false, zoneInfo = null;
+
+function zoneBBox(g, isMulti){
+  let x1=180,y1=90,x2=-180,y2=-90;
+  (isMulti ? g : [g]).forEach(poly => poly[0].forEach(c => {
+    if(c[0]<x1)x1=c[0]; if(c[0]>x2)x2=c[0];
+    if(c[1]<y1)y1=c[1]; if(c[1]>y2)y2=c[1];
+  }));
+  return [x1,y1,x2,y2];
+}
+
+function loadZones(cb){
+  if(window.JEONGBI){ cb(); return; }
+  if(zoneLoading) return;
+  zoneLoading = true;
+  const sc = document.createElement('script');
+  sc.src = 'jeongbi_map.js';
+  sc.onload = () => {
+    (window.JEONGBI || []).forEach(z => { z._b = zoneBBox(z.g, z.t === 1); });
+    zoneLoading = false; cb();
+  };
+  sc.onerror = () => { zoneLoading = false; alert('정비구역 데이터를 불러오지 못했습니다. jeongbi_map.js가 업로드됐는지 확인하세요.'); };
+  document.head.append(sc);
+}
+
+function clearZones(){ zonePolys.forEach(p => p.setMap(null)); zonePolys = []; }
+
+function drawZones(){
+  if(!mapReady) return;
+  clearZones();
+  if(!state.zonelayer) return;
+  if(!window.JEONGBI){ loadZones(drawZones); return; }
+
+  const lv = map.getLevel();
+  if(lv > 6){ $('#zoneHint').textContent = '더 확대하면 구역이 표시됩니다'; $('#zoneHint').style.display=''; return; }
+  $('#zoneHint').style.display = 'none';
+
+  const b = map.getBounds(), sw = b.getSouthWest(), ne = b.getNorthEast();
+  const [bx1,by1,bx2,by2] = [sw.getLng(), sw.getLat(), ne.getLng(), ne.getLat()];
+
+  let n = 0;
+  for(const z of window.JEONGBI){
+    const [x1,y1,x2,y2] = z._b;
+    if(x2 < bx1 || x1 > bx2 || y2 < by1 || y1 > by2) continue;   // 화면 밖
+    if(++n > 160) break;                                          // 과부하 방지
+    const color = ZCOLOR[z.c] || '#8B98A5';
+    const polys = (z.t === 1) ? z.g : [z.g];
+    polys.forEach(poly => {
+      const paths = poly.map(ring => ring.map(c => new kakao.maps.LatLng(c[1], c[0])));
+      const pg = new kakao.maps.Polygon({
+        path: paths.length > 1 ? paths : paths[0],
+        strokeWeight: 2, strokeColor: color, strokeOpacity: 0.95, strokeStyle: 'solid',
+        fillColor: color, fillOpacity: 0.22
+      });
+      pg.setMap(map);
+      kakao.maps.event.addListener(pg, 'click', function(e){
+        if(zoneInfo) zoneInfo.close();
+        zoneInfo = new kakao.maps.InfoWindow({
+          position: e.latLng, removable: true,
+          content: `<div style="padding:7px 10px;font-size:12px;line-height:1.5;max-width:210px">
+                      <b>${z.n}</b><br><span style="color:${color}">${z.s}</span></div>`
+        });
+        zoneInfo.open(map);
+      });
+      zonePolys.push(pg);
+    });
+  }
+  $('#zoneHint').textContent = `구역 ${n}개`;
+  $('#zoneHint').style.display = n ? '' : 'none';
+}
+
 function initMap(cb){
   if(mapReady) return cb && cb();
   const s = document.createElement('script');
@@ -629,7 +743,12 @@ function syncUI(){
   $$('[data-src]').forEach(c => c.classList.toggle('srcon', c.dataset.src === state.src));
   $$('[data-src2]').forEach(c => c.classList.toggle('srcon', c.dataset.src2 === state.src));
   $('#fNew2').classList.toggle('on', state.newonly);
+  ['#fZone','#fZone2'].forEach(x => { const e=$(x); if(e) e.classList.toggle('zoneon', state.zoneonly); });
+  const zl=$('#zLayer'); if(zl) zl.classList.toggle('zoneon', state.zonelayer);
+  document.body.classList.toggle('zonelayer', state.zonelayer);
 }
+['#fZone','#fZone2'].forEach(x => { const e=$(x); if(e) e.onclick = () => { state.zoneonly = !state.zoneonly; syncUI(); render(); }; });
+$('#zLayer').onclick = () => { state.zonelayer = !state.zonelayer; syncUI(); if(state.zonelayer) drawZones(); else clearZones(); };
 $('#fBtn').onclick   = () => $('#panel').classList.toggle('on');
 $('#fBtn2').onclick  = () => $('#panel').classList.toggle('on');
 $('#fNew2').onclick  = () => { state.newonly = !state.newonly; syncUI(); render(); };
@@ -648,7 +767,7 @@ $('#aUnit').onclick  = () => {
 };
 $('#fClose').onclick = () => $('#panel').classList.remove('on');
 $('#fReset').onclick = () => {
-  state = {...state, gu:'', types:{apt:true,villa:true,etc:true}, noShare:false, under:false, newonly:false, areaUnit:'m2', ...blank()};
+  state = {...state, gu:'', types:{apt:true,villa:true,etc:true}, noShare:false, under:false, newonly:false, zoneonly:false, zonelayer:false, areaUnit:'m2', ...blank()};
   $('#au1').textContent = '㎡ ~'; $('#au2').textContent = '㎡'; $('#aUnit').textContent = '평으로';
   RANGE.forEach(k => $('#'+k).value = '');
   syncUI(); render();
