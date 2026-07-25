@@ -317,6 +317,11 @@ def process_one(s, r):
 
     gaman = int(r.get("gamevalAmt") or 0)
     lowp  = int(r.get("minmaePrice") or 0)
+    # ★ 목록 API의 minmaePrice는 유찰 회차가 한 번 덜 반영된 값이 오는 경우가 많다.
+    #    기일 사다리에서 아직 결과가 없는(= 진행 예정) 마지막 기일의 최저가를 우선 사용한다.
+    for _row in reversed(ladder):
+        if not _row.get("rslt") and int(_row.get("low") or 0) > 0:
+            lowp = int(_row["low"]); break
     maeamt = int(r.get("maeAmt") or 0) or sold_amt
     yuchal = int(r.get("yuchalCnt") or 0)
     lowrate = round(lowp / gaman * 100) if gaman else None
@@ -430,6 +435,82 @@ def crawl():
     return picked
 crawl.max_pages = None
 
+# ── 신규매물 판별 + 텔레그램 알림 (공매 fetch_gonmae.py와 동일 방식) ──
+TG_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
+TG_CHAT  = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+
+def _gm_key(x):
+    return f"{x.get('boCd','')}_{x.get('caseNo','')}_{x.get('gdsSeq','')}"
+
+def read_prev_gm():
+    """직전 data_gyeongmae.js를 읽어 물건 목록 반환. 없으면 빈 리스트."""
+    try:
+        s = open("data_gyeongmae.js", encoding="utf-8").read()
+        d = json.loads(s[s.index("{"):s.rindex("}") + 1])
+        return d.get("items", []) if isinstance(d, dict) else (d or [])
+    except Exception:
+        return []
+
+def _eok_gm(v):
+    return f"{v/1e8:.2f}억" if v else "—"
+
+def tg_send_gm(text):
+    if not (TG_TOKEN and TG_CHAT):
+        print("  (텔레그램 토큰/챗ID 없음 → 알림 생략)"); return False
+    try:
+        import urllib.request, urllib.parse
+        data = urllib.parse.urlencode({"chat_id": TG_CHAT, "text": text,
+                                       "disable_web_page_preview": "true"}).encode()
+        urllib.request.urlopen(urllib.request.Request(
+            f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", data=data), timeout=15)
+        return True
+    except Exception as e:
+        print(f"  (텔레그램 실패: {e})"); return False
+
+def mark_first(items):
+    """최초 등장일(first)을 물건마다 기록하고, 오늘 처음 등장한 것만 돌려준다."""
+    prev = {_gm_key(x): x for x in read_prev_gm()}
+    today = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 9 * 3600))
+    for x in items:
+        p = prev.get(_gm_key(x))
+        if p and p.get("first"):
+            x["first"] = p["first"]      # 이전 등장일 승계
+        elif p:
+            x["first"] = "-"             # 이전에도 있었으나 미기록 → 신규 아님
+        else:
+            x["first"] = today           # 처음 보는 물건
+    return [x for x in items if x["first"] == today] if prev else []
+
+def notify_new_gm(items):
+    if not items:
+        print("  신규 경매물건 없음 → 텔레그램 생략"); return
+    items = sorted(items, key=lambda x: -(x.get("gap") or 0))
+    today = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 9 * 3600))
+    header = f"\u2696\ufe0f 새 경매 {len(items)}건 ({today})\n"
+    blocks = []
+    for d in items:
+        L = [f"• {d.get('name') or d.get('addr')}", f"  {d.get('addr','')}"]
+        rate = f" ({d['lowRate']}%)" if d.get("lowRate") else ""
+        L.append(f"  최저 {_eok_gm(d.get('low'))} / 감정 {_eok_gm(d.get('gaman'))}{rate}")
+        if (d.get("gap") or 0) > 0:
+            L.append(f"  실거래 대비 {_eok_gm(d['gap'])} 낮음")
+        if d.get("yuchal"): L.append(f"  유찰 {d['yuchal']}회")
+        if d.get("jibun"):  L.append("  ⚠️ 지분물건")
+        L.append(f"  {d.get('court','')} {d.get('gyae','')} {d.get('caseNo','')}")
+        if d.get("saleDate"):
+            sd = str(d["saleDate"])
+            L.append(f"  매각기일 {sd[:4]}.{sd[4:6]}.{sd[6:8]}")
+        blocks.append("\n".join(L))
+    msg, sent = header, 0
+    for b in blocks:
+        if len(msg) + len(b) + 2 > 3800:
+            if tg_send_gm(msg): sent += 1
+            msg = "(계속)\n"
+        msg += ("\n" if msg.strip() else "") + b
+    if msg.strip() and tg_send_gm(msg): sent += 1
+    print(f"  ✅ 텔레그램 신규 경매물건 {len(items)}건 전송 (메시지 {sent}통)")
+
+
 def write_js(items):
     items.sort(key=lambda x: (x["saleDate"] or "99999999"))
     payload = {"updated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -455,5 +536,7 @@ if __name__ == "__main__":
         crawl.max_pages = a.pages
     t0 = time.time()
     items = crawl()
+    new_items = mark_first(items)   # ★ first 기록 (write_js 전에 실행해야 직전 파일을 읽을 수 있음)
     write_js(items)
+    notify_new_gm(new_items)
     print(f"소요 {time.time()-t0:.0f}s")
