@@ -18,6 +18,11 @@ fetch_gyeongmae.py  v2
 """
 import sys, os, re, json, time, argparse, datetime, threading, base64, hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
+try:
+    from zone_tag import ZoneIndex
+    ZONE = ZoneIndex()
+except Exception as _e:
+    print("[zone] 구역 태그 비활성:", _e); ZONE = None
 
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
@@ -373,6 +378,8 @@ def process_one(s, r):
         except Exception as e:
             print(f"[실거래 실패] {r.get('srnSaNo')} {e}")
 
+    _zone = ZONE.find(geo.get("lat"), geo.get("lng")) if (ZONE and geo) else None
+
     return {
         "src": "경매",
         "court": COURTS.get(court, court),
@@ -385,6 +392,9 @@ def process_one(s, r):
         "lat": geo.get("lat") if geo else None,
         "lng": geo.get("lng") if geo else None,
         "bcode": geo.get("bcode", "") if geo else "",
+        "zone": _zone["nm"] if _zone else None,
+        "zoneCat": _zone["cat"] if _zone else None,
+        "zoneSub": _zone["sub"] if _zone else None,
         "gaman": gaman, "low": lowp, "lowRate": lowrate,
         "maeAmt": maeamt, "yuchal": yuchal,
         "saleDate": r.get("maeGiil",""),
