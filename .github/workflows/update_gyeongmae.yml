@@ -25,6 +25,8 @@ jobs:
         env:
           KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
           DATA_KEY: ${{ secrets.DATA_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python fetch_gyeongmae.py 2>&1 | tee crawl_gyeongmae.log
 
       - name: commit data
