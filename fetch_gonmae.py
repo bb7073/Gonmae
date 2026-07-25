@@ -470,6 +470,8 @@ def _process_one(pack, gu, lawd, gc):
     jibun_addr, bldg, umd, jibun = parse_addr(full)
     coord = geocode(jibun_addr or f"{REGION_SD} {gu}", bldg, gc)
     if not coord: return "area", None
+    if isinstance(coord, dict):
+        coord = [coord.get("lng"), coord.get("lat"), coord.get("bcode", "")]
     bjd = coord[2] if len(coord) > 2 else ""
 
     names = deal_names(lawd, umd, jibun)
