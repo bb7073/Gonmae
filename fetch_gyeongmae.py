@@ -64,7 +64,10 @@ def kind_of(usg):
 PAGE_SIZE = 40
 SLEEP = 0.6
 DTL_WORKERS = 4
-GEO_CACHE = "geocode_cache.json"
+# ★ 공매(fetch_gonmae.py)와 캐시를 공유하면 값 형식이 달라 서로를 덮어쓴다.
+#    공매는 리스트 [lng, lat, bcode], 경매는 dict {"lat":..,"lng":..} 형식.
+#    그래서 경매는 전용 파일을 쓴다.
+GEO_CACHE = "geocode_cache_gm.json"
 
 def new_session():
     s = requests.Session()
@@ -167,10 +170,19 @@ def parse_ladder(dma_result):
 
 _geo_lock = threading.Lock()
 def load_geo():
+    """전용 캐시를 읽는다. 예전 공유 캐시(geocode_cache.json)에 남아 있던
+       경매용 dict 항목도 최초 1회 흡수해서, 새 파일로 넘어올 때 재지오코딩을 피한다."""
+    d = {}
     if os.path.exists(GEO_CACHE):
-        try: return json.load(open(GEO_CACHE, encoding="utf-8"))
-        except Exception: return {}
-    return {}
+        try: d = json.load(open(GEO_CACHE, encoding="utf-8")) or {}
+        except Exception: d = {}
+    if not d and os.path.exists("geocode_cache.json"):
+        try:
+            legacy = json.load(open("geocode_cache.json", encoding="utf-8")) or {}
+            d = {k: v for k, v in legacy.items() if isinstance(v, dict) and v.get("lat")}
+            if d: print(f"[지오캐시] 예전 공유 캐시에서 {len(d)}건 흡수")
+        except Exception: pass
+    return {k: v for k, v in d.items() if isinstance(v, dict)}
 GEO = load_geo()
 
 def geocode(addr):
