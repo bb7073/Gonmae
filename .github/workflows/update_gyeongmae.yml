@@ -1,9 +1,11 @@
 name: update-gyeongmae
 
+# ★ 자동 스케줄 해제됨.
+#    courtauction.go.kr은 해외 IP(=GitHub Actions 러너)에서 접속이 차단되어
+#    돌리면 전부 timeout → 0건으로 끝난다. 경매 수집은 한국 IP인 VPS에서만 가능.
+#    아래 workflow_dispatch만 남겨 수동 실행/테스트용으로 유지한다.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 23 * * *'   # 매일 08:00 KST (23:00 UTC)
 
 permissions:
   contents: write
