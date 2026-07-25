@@ -33,11 +33,13 @@ select,.chip,input{background:var(--surface2);color:var(--text);border:1px solid
 .chip.on[data-t="apt"],#mapbar .chip.on[data-t="apt"]{background:var(--apt);border-color:var(--apt);color:#0B0B0B}
 .chip.on[data-t="villa"],#mapbar .chip.on[data-t="villa"]{background:var(--villa);border-color:var(--villa);color:#0B0B0B}
 .chip.on[data-t="etc"],#mapbar .chip.on[data-t="etc"]{background:#5A6672;border-color:#5A6672;color:#fff}
-#panel{display:none;padding:12px 14px 4px;border-bottom:1px solid var(--line);background:var(--surface)}
+#panel{display:none;padding:8px 12px 2px;border-bottom:1px solid var(--line);background:var(--surface)}
 #panel.on{display:block}
-.frow{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:13px}
-.frow b{width:52px;color:var(--muted);font-weight:600;flex:0 0 auto}
-.frow input{border-radius:10px;width:100%;min-width:0;padding:8px 10px;text-align:center}
+body.mapmode #panel.on{position:fixed;top:0;left:0;right:0;z-index:40;max-height:72vh;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.6)}
+.frow{display:flex;align-items:center;gap:5px;margin-bottom:5px;font-size:12px}
+.frow b{width:52px;font-size:11px;color:var(--muted);font-weight:600;flex:0 0 auto}
+.frow span{font-size:11px;color:var(--muted);flex:0 0 auto}
+.frow input{border-radius:8px;width:100%;min-width:0;padding:5px 8px;font-size:12px;text-align:center}
 main{padding:12px 12px 0}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
   padding:12px;margin-bottom:10px;display:flex;gap:12px;cursor:pointer}
@@ -185,6 +187,8 @@ tr.cur td{color:var(--accent);font-weight:700}
 
 <div id="mapview">
   <div id="mapbar">
+    <button class="chip" id="fBtn2">⚙필터</button>
+    <button class="chip" id="fNew2">✦신규</button>
     <button class="chip srcon" data-src2="all">전체</button>
     <button class="chip" data-src2="gonmae">공매</button>
     <button class="chip" data-src2="gm">⚖경매</button>
@@ -204,6 +208,7 @@ tr.cur td{color:var(--accent);font-weight:700}
   <button id="tabToday"><b>✦</b>오늘</button>
   <button id="tabFav"><b>★</b>관심</button>
   <button id="tabMap"><b>◎</b>지도</button>
+  <button id="tabNew"><b>✦</b>신규</button>
 </nav>
 
 <div id="sheet"><div class="sheetbody" id="sheetbody"></div></div>
@@ -301,7 +306,7 @@ const isUnder = d => { const a = adjDeal(d); return !!(a && d.min && d.min < a *
 
 const RANGE = ['p1','p2','v1','v2','a1','a2','f1','f2','d1','d2'];
 const blank = () => Object.fromEntries(RANGE.map(k => [k, null]));
-let state = {sort:'gap', gu:'', view:'all', src:'all', types:{apt:true, villa:true, etc:true}, noShare:false, under:false, ...blank()};
+let state = {sort:'gap', gu:'', view:'all', src:'all', types:{apt:true, villa:true, etc:true}, noShare:false, under:false, newonly:false, ...blank()};
 
 [...new Set(D.map(d => d.gu))].filter(Boolean).sort().forEach(g => {
   ['#gu','#gu2'].forEach(sel => {
@@ -322,6 +327,7 @@ function filtered(){
     if(state.src !== 'all' && d.src !== state.src) return false;
     if(state.view === 'today' && !isNew(d)) return false;
     if(state.view === 'fav'   && !isFav(d)) return false;
+    if(state.newonly && !isNew(d)) return false;
     if(state.gu && d.gu !== state.gu) return false;
     if(!state.types[d.type]) return false;
     if(state.noShare && isShare(d)) return false;
@@ -548,7 +554,7 @@ function initMap(cb){
   s.onerror = () => $('#map').innerHTML = '<div class="empty" style="margin:20px">지도를 불러오지 못했습니다. 카카오 개발자센터 Web 플랫폼 도메인 등록을 확인하세요.</div>';
   document.head.append(s);
 }
-const navB = {list:$('#tabList'), today:$('#tabToday'), fav:$('#tabFav'), map:$('#tabMap')};
+const navB = {list:$('#tabList'), today:$('#tabToday'), fav:$('#tabFav'), map:$('#tabMap'), new:$('#tabNew')};
 function highlight(k){ Object.values(navB).forEach(b => b.classList.remove('on')); navB[k].classList.add('on'); }
 
 /* ovStack: 열린 오버레이 스택. []=목록 / ['map'] / ['map','sheet'] / ['sheet']
@@ -559,7 +565,7 @@ function applyOverlay(){
   const top = ovStack[ovStack.length - 1] || null;
   document.body.classList.toggle('mapmode', ovStack.includes('map'));
   $('#sheet').classList.toggle('on', top === 'sheet');
-  highlight(ovStack.includes('map') ? 'map' : (state.view === 'all' ? 'list' : state.view));
+  highlight(ovStack.includes('map') ? (state.newonly ? 'new' : 'map') : (state.view === 'all' ? 'list' : state.view));
 }
 function pushOverlay(kind){ ovStack.push(kind); history.pushState({ov:ovStack.slice()}, ''); applyOverlay(); }
 window.addEventListener('popstate', () => { ovStack.pop(); applyOverlay(); });
@@ -586,7 +592,8 @@ function goView(v){
 navB.list.onclick  = () => goView('all');
 navB.today.onclick = () => goView('today');
 navB.fav.onclick   = () => goView('fav');
-navB.map.onclick   = () => showMap(null);
+navB.map.onclick   = () => { state.newonly = false; syncUI(); showMap(null); };
+navB.new.onclick   = () => { state.newonly = true;  syncUI(); showMap(null); };
 
 /* ── 필터 바인딩 (목록·지도 공통) ── */
 function syncUI(){
@@ -596,11 +603,14 @@ function syncUI(){
   ['#fUnder','#fUnder2'].forEach(s => $(s).classList.toggle('underon', state.under));
   $$('[data-src]').forEach(c => c.classList.toggle('srcon', c.dataset.src === state.src));
   $$('[data-src2]').forEach(c => c.classList.toggle('srcon', c.dataset.src2 === state.src));
+  $('#fNew2').classList.toggle('on', state.newonly);
 }
 $('#fBtn').onclick   = () => $('#panel').classList.toggle('on');
+$('#fBtn2').onclick  = () => $('#panel').classList.toggle('on');
+$('#fNew2').onclick  = () => { state.newonly = !state.newonly; syncUI(); render(); };
 $('#fClose').onclick = () => $('#panel').classList.remove('on');
 $('#fReset').onclick = () => {
-  state = {...state, gu:'', types:{apt:true,villa:true,etc:true}, noShare:false, under:false, ...blank()};
+  state = {...state, gu:'', types:{apt:true,villa:true,etc:true}, noShare:false, under:false, newonly:false, ...blank()};
   RANGE.forEach(k => $('#'+k).value = '');
   syncUI(); render();
 };
