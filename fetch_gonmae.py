@@ -7,6 +7,11 @@ v10: ★지분물건 판별(상세 API 면적정보 '비고' 파싱 + 실거래�
 """
 import json, os, re, sys, time, urllib.parse, urllib.request, urllib.error
 import xml.etree.ElementTree as ET
+try:
+    from zone_tag import ZoneIndex
+    ZONE = ZoneIndex()
+except Exception as _e:
+    print("[zone] 구역 태그 비활성:", _e); ZONE = None
 from concurrent.futures import ThreadPoolExecutor
 
 sys.stdout.reconfigure(line_buffering=True)
@@ -512,6 +517,10 @@ def _process_one(pack, gu, lawd, gc):
         "heat": apt.get("heat"), "hall": apt.get("hall"), "kaptName": apt.get("kaptName"),
         "park": apt.get("park"), "subway": apt.get("subway"), "subwayMin": apt.get("subwayMin"),
         "lat": coord[1], "lng": coord[0]}
+    _z = ZONE.find(coord[1], coord[0]) if ZONE else None
+    row["zone"] = _z["nm"] if _z else None
+    row["zoneCat"] = _z["cat"] if _z else None
+    row["zoneSub"] = _z["sub"] if _z else None
     row["on"] = onbid_ids(it, row["cd"])
     return "ok", row
 
