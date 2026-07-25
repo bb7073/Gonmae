@@ -536,6 +536,14 @@ if __name__ == "__main__":
         crawl.max_pages = a.pages
     t0 = time.time()
     items = crawl()
+    # ★ 안전장치: 수집 0건이면 기존 data_gyeongmae.js를 절대 덮어쓰지 않는다.
+    #    (해외 IP에서는 courtauction.go.kr 접속이 차단돼 전부 timeout → 0건으로 저장되면
+    #     멀쩡한 기존 데이터가 통째로 날아간다. 반드시 한국 IP(VPS)에서 실행할 것.)
+    if not items:
+        prev = read_prev_gm()
+        print(f"\n✖ 수집 0건 — 저장/알림을 건너뜁니다. 기존 {len(prev)}건 데이터 보존됨.")
+        print("  (법원경매 사이트 접속 차단 또는 네트워크 장애일 가능성이 큽니다.)")
+        sys.exit(1)
     new_items = mark_first(items)   # ★ first 기록 (write_js 전에 실행해야 직전 파일을 읽을 수 있음)
     write_js(items)
     notify_new_gm(new_items)
