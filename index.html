@@ -17,6 +17,7 @@ body{margin:0;background:var(--bg);color:var(--text);
   font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Noto Sans KR",sans-serif;
   padding-bottom:calc(64px + env(safe-area-inset-bottom))}
 .num{font-variant-numeric:tabular-nums}
+.py{color:var(--muted);font-weight:400;font-size:.88em}
 header{position:sticky;top:0;z-index:20;background:rgba(15,18,22,.94);backdrop-filter:blur(10px);
   border-bottom:1px solid var(--line);padding:12px 14px 10px}
 h1{margin:0;font-size:18px;display:flex;align-items:center;gap:8px}
@@ -162,8 +163,9 @@ tr.cur td{color:var(--accent);font-weight:700}
     <input id="v2" type="number" inputmode="decimal" placeholder="최대"><span>억</span>
   </div>
   <div class="frow"><b>전용면적</b>
-    <input id="a1" type="number" inputmode="decimal" placeholder="최소"><span>㎡ ~</span>
-    <input id="a2" type="number" inputmode="decimal" placeholder="최대"><span>㎡</span>
+    <input id="a1" type="number" inputmode="decimal" placeholder="최소"><span id="au1">㎡ ~</span>
+    <input id="a2" type="number" inputmode="decimal" placeholder="최대"><span id="au2">㎡</span>
+    <button class="chip" id="aUnit" style="flex:0 0 auto;padding:4px 8px;font-size:11px">평으로</button>
   </div>
   <div class="frow"><b>유찰횟수</b>
     <input id="f1" type="number" inputmode="numeric" placeholder="최소"><span>회 ~</span>
@@ -223,6 +225,10 @@ tr.cur td{color:var(--accent);font-weight:700}
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const eok = v => v ? (v/1e8).toFixed(2) + '억' : '—';
+/* 면적 표기: 1평 = 3.3058㎡ */
+const PY = 3.3058;
+const py    = m => m ? (m/PY).toFixed(1) : '';
+const area2 = m => m ? `${m}㎡ <span class="py">(${py(m)}평)</span>` : '—';
 const ymd = s => s ? String(s).replace(/(\d{4})(\d{2})(\d{2}).*/, '$1.$2.$3') : '—';
 const dt  = s => s && String(s).length >= 12
   ? `${s.slice(0,4)}.${s.slice(4,6)}.${s.slice(6,8)} ${s.slice(8,10)}:${s.slice(10,12)}` : ymd(s);
@@ -306,7 +312,7 @@ const isUnder = d => { const a = adjDeal(d); return !!(a && d.min && d.min < a *
 
 const RANGE = ['p1','p2','v1','v2','a1','a2','f1','f2','d1','d2'];
 const blank = () => Object.fromEntries(RANGE.map(k => [k, null]));
-let state = {sort:'gap', gu:'', view:'all', src:'all', types:{apt:true, villa:true, etc:true}, noShare:false, under:false, newonly:false, ...blank()};
+let state = {sort:'gap', gu:'', view:'all', src:'all', types:{apt:true, villa:true, etc:true}, noShare:false, under:false, newonly:false, areaUnit:'m2', ...blank()};
 
 [...new Set(D.map(d => d.gu))].filter(Boolean).sort().forEach(g => {
   ['#gu','#gu2'].forEach(sel => {
@@ -334,7 +340,8 @@ function filtered(){
     if(state.under && !isUnder(d)) return false;
     if(!rng((d.min||0)/1e8,  state.p1, state.p2)) return false;
     if(!rng((d.aprs||0)/1e8, state.v1, state.v2)) return false;
-    if(!rng(effArea(d),      state.a1, state.a2)) return false;
+    const AU = state.areaUnit === 'py' ? PY : 1;
+    if(!rng(effArea(d), state.a1 != null ? state.a1*AU : null, state.a2 != null ? state.a2*AU : null)) return false;
     if(!rng(d.fail || 0,     state.f1, state.f2)) return false;
     if(!rng(d.disc || 0,     state.d1, state.d2)) return false;
     return true;
@@ -375,8 +382,8 @@ function render(){
         <div class="addr">${d.addr}</div>
         <div class="prices num"><span class="min">${eok(d.min)}</span>
           <span class="aprs">감정 ${eok(d.aprs)}${d.disc?` (${d.disc}%)`:''}</span>
-          <span class="addr">${d.area ? d.area+'㎡' : ''}${
-            isShare(d) && d.fullArea ? ` <span style="color:var(--warn)">/ 전체 ${d.fullArea}㎡</span>` : ''}</span></div>
+          <span class="addr">${d.area ? area2(d.area) : ''}${
+            isShare(d) && d.fullArea ? ` <span style="color:var(--warn)">/ 전체 ${d.fullArea}㎡ (${py(d.fullArea)}평)</span>` : ''}</span></div>
         ${gapLine(d)}
       </div></div>`).join('');
   el.querySelectorAll('.card').forEach(c => c.onclick = () => openSheet(rows[+c.dataset.i]));
@@ -458,7 +465,7 @@ function openSheet(d){
         <dd style="color:var(--warn)">${eok(adjDeal(d))}</dd>` : ''}
       <dt>실거래 평균 (2년)</dt><dd>${d.dealAvg ? eok(d.dealAvg) : '—'}</dd>
       <dt>차액${sh?' (환산 기준)':''}</dt><dd style="color:${d.gap>0?'var(--good)':'var(--muted)'}">${d.gap>0 ? eok(d.gap) : '—'}</dd>
-      <dt>전용면적</dt><dd>${d.area||'—'}㎡</dd>
+      <dt>전용면적</dt><dd>${area2(d.area)}</dd>
       <dt>구분</dt><dd>${TN[d.type]} · ${d.use||'—'}</dd>
       ${aptRows}
       <dt>유찰</dt><dd>${d.fail||0}회</dd>
@@ -485,9 +492,9 @@ function openSheet(d){
         <td>${gm?ymd(l.end.slice(0,8)):dt(l.end)}</td><td>${eok(l.min)}</td>
         ${gm?`<td>${l.amt?('낙찰 '+eok(l.amt)):(l.rslt==='002'?'유찰':'—')}</td>`:''}</tr>`).join('')}</table>` : ''}
     <h3>이 번지의 실거래 ${hist.length ? `(${hist.length}건 / 최근 2년${sh?' · 전체 1채 기준':''})` : ''}</h3>
-    ${hist.length ? `<table><tr><th>거래월</th><th>층</th><th>전용</th><th>거래가</th><th></th></tr>
+    ${hist.length ? `<table><tr><th>거래월</th><th>층</th><th>전용 ㎡/평</th><th>거래가</th><th></th></tr>
       ${hist.map(h => `<tr class="num"><td>${h.ym.slice(0,4)}.${h.ym.slice(4)}</td><td>${h.fl||'—'}</td>
-        <td>${h.area||'—'}</td><td>${eok(h.amt)}</td>
+        <td>${h.area ? h.area+' <span class="py">/ '+py(h.area)+'</span>' : '—'}</td><td>${eok(h.amt)}</td>
         <td style="width:70px"><span style="display:inline-block;height:6px;border-radius:3px;background:var(--accent);width:${h.amt/max*60}px"></span></td></tr>`).join('')}
       </table>` : '<div class="empty">같은 번지의 실거래가 없습니다.</div>'}
     <p style="color:var(--muted);font-size:12px;line-height:1.6;margin-top:18px">
@@ -608,9 +615,23 @@ function syncUI(){
 $('#fBtn').onclick   = () => $('#panel').classList.toggle('on');
 $('#fBtn2').onclick  = () => $('#panel').classList.toggle('on');
 $('#fNew2').onclick  = () => { state.newonly = !state.newonly; syncUI(); render(); };
+$('#aUnit').onclick  = () => {
+  const toPy = state.areaUnit === 'm2';
+  ['a1','a2'].forEach(k => {                       // 입력해 둔 값도 같이 환산
+    if(state[k] == null) return;
+    state[k] = +(toPy ? state[k]/PY : state[k]*PY).toFixed(1);
+    $('#'+k).value = state[k];
+  });
+  state.areaUnit = toPy ? 'py' : 'm2';
+  const u = toPy ? '평' : '㎡';
+  $('#au1').textContent = u + ' ~'; $('#au2').textContent = u;
+  $('#aUnit').textContent = toPy ? '㎡로' : '평으로';
+  render();
+};
 $('#fClose').onclick = () => $('#panel').classList.remove('on');
 $('#fReset').onclick = () => {
-  state = {...state, gu:'', types:{apt:true,villa:true,etc:true}, noShare:false, under:false, newonly:false, ...blank()};
+  state = {...state, gu:'', types:{apt:true,villa:true,etc:true}, noShare:false, under:false, newonly:false, areaUnit:'m2', ...blank()};
+  $('#au1').textContent = '㎡ ~'; $('#au2').textContent = '㎡'; $('#aUnit').textContent = '평으로';
   RANGE.forEach(k => $('#'+k).value = '');
   syncUI(); render();
 };
