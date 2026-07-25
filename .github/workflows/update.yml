@@ -1,7 +1,7 @@
 name: 공매 데이터 갱신
 on:
   schedule:
-    - cron: '0 0 * * *'   # 매일 00:00 UTC = 09:00 KST (깃허브 사정상 수십 분 밀릴 수 있음)
+    - cron: '0 23 * * *'   # 매일 23:00 UTC = 08:00 KST (깃허브 사정상 수십 분 밀릴 수 있음)
   workflow_dispatch:
 permissions:
   contents: write
