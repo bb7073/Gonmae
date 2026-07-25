@@ -634,8 +634,9 @@ if __name__ == "__main__":
 
     gc = {}
     if os.path.exists(fp("geocode_cache.json")):
+        # ★ 리스트 형식만 받아들인다. dict가 섞여 있으면 coord[2]에서 KeyError가 나므로 배제.
         gc = {k: v for k, v in json.load(open(fp("geocode_cache.json"), encoding="utf-8")).items()
-              if v and len(v) >= 3}
+              if isinstance(v, (list, tuple)) and len(v) >= 3}
 
     prev_by_id = {x.get("id"): x for x in read_prev() if x.get("id")}
     cur, t0 = [], time.time()
