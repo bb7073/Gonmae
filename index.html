@@ -265,6 +265,12 @@ body.zonelayer #zoneLegend{display:flex}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="data.js"></script>
 <script src="data_gyeongmae.js"></script>
+<script src="stages.js"></script>
+<script>
+window.ZDONE=(window.ZSTAGE&&window.ZSTAGE.done)||['준공인가','이전고시','조합해산','조합청산'];
+function zstage(n){return (window.ZSTAGE&&window.ZSTAGE.st&&window.ZSTAGE.st[n])||'';}
+function zdone(n){var v=zstage(n);return !!v&&window.ZDONE.indexOf(v)>=0;}
+</script>
 <script>
 /* ── 공매(GONMAE) + 경매(GYEONGMAE) 통합 로드 ──────────────────
    공매는 기존 스키마 그대로. 경매는 gmToGonmae()로 공매 필드에 흡수.
@@ -492,14 +498,16 @@ function openSheet(d){
     </div>` : '';
 
   const zYear = d.zoneDate ? parseInt(d.zoneDate.slice(0,4)) : null;
-  const zOld  = zYear && zYear < 2010;
-  const zoneBox = d.zone ? `
-    <div class="zonebox${zOld ? ' stale' : ''}">
+  const zOld = zYear && zYear < 2010;
+  const zSt = zstage(d.zone), zFin = !!zSt && zdone(d.zone);
+  const zoneBox = (d.zone && !zFin) ? `
+    <div class="zonebox">
       <b>🏗 정비구역 내 물건</b><br>
       <b>${d.zone}</b>${d.zoneSub ? ` · ${d.zoneSub}` : ''}
       ${d.zoneDate ? `<br>최초 결정고시 <b>${d.zoneDate}</b>` : ''}
-      ${zOld ? `<small>⚠ 고시가 오래된 구역입니다. 이미 준공·해제된 사업일 수 있으니(예: 준공 후에도 옛 구역 경계가 남아 있음) 반드시 현재 진행 여부를 확인하세요.</small>` : ''}
-      <small>구역 경계는 서울시 의제처리구역(UPIS) 기준이며 참고용입니다. 이 데이터에는 <b>진행단계 정보가 없습니다</b> — 조합설립·사업시행인가 여부, 조합원 지위 승계, 분담금은 반드시 별도 확인하세요.</small>
+      ${zSt ? `<br>진행단계 <b>${zSt}</b>` : ''}
+      
+      <small>구역 경계는 서울시 의제처리구역(UPIS) 기준이며 참고용입니다. 이 데이터에는 <b>진행단계는 정보몽땅 기준</b>(표시 없으면 미확인) — 조합설립·사업시행인가 여부, 조합원 지위 승계, 분담금은 반드시 별도 확인하세요.</small>
     </div>` : '';
 
   const aptRows = d.hh ? `
@@ -658,6 +666,7 @@ function drawZones(){
 
   let n = 0;
   for(const z of window.JEONGBI){
+    if(zdone(z.n)) continue;
     const [x1,y1,x2,y2] = z._b;
     if(x2 < bx1 || x1 > bx2 || y2 < by1 || y1 > by2) continue;   // 화면 밖
     if(++n > 160) break;                                          // 과부하 방지
