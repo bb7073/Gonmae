@@ -242,12 +242,7 @@ body.zonelayer #zoneLegend{display:flex}
     <button class="chip" id="zLayer">🗺 구역표시</button>
     <button class="chip" id="mapCnt" style="pointer-events:none"></button>
   </div>
-  <div id="zoneLegend">
-    <span><i style="background:#FF8A3D"></i>재개발·재건축</span>
-    <span><i style="background:#FFC24B"></i>가로·자율주택</span>
-    <span><i style="background:#B98CFF"></i>뉴타운(촉진)</span>
-    <span><i style="background:#8B98A5"></i>기타개발</span>
-    <b id="zoneHint"></b>
+  <div id="zoneLegend"><span><i style="background:#FF8A3D"></i>재개발</span><span><i style="background:#FF6B6B"></i>재건축</span><span><i style="background:#FFC24B"></i>모아·가로·소규모</span><span><i style="background:#4DA3FF"></i>역세권</span><span><i style="background:#3DD68C"></i>공공재개발</span><span><i style="background:#B98CFF"></i>촉진(뉴타운)</span><b id="zoneHint"></b>
   </div>
   <div id="map"></div>
 </div>
@@ -677,8 +672,8 @@ function drawZones(){
       const paths = poly.map(ring => ring.map(c => new kakao.maps.LatLng(c[1], c[0])));
       const pg = new kakao.maps.Polygon({
         path: paths.length > 1 ? paths : paths[0],
-        strokeWeight: 2, strokeColor: color, strokeOpacity: 0.95, strokeStyle: 'solid',
-        fillColor: color, fillOpacity: 0.22
+        strokeWeight: 2, strokeColor: zcol(z), strokeOpacity: 0.9, strokeStyle: 'solid',
+        fillColor: zcol(z), fillOpacity: 0.08
       });
       pg.setMap(map);
       kakao.maps.event.addListener(pg, 'click', function(e){
