@@ -144,6 +144,8 @@ tr.cur td{color:var(--accent);font-weight:700}
 .zonebox{background:var(--zonebg);border:1px solid var(--zoneborder);border-radius:12px;padding:11px 12px;
   font-size:13px;line-height:1.55;color:var(--zonetext);margin:14px 0 0}
 .zonebox b{color:var(--zoneb)}
+.zonebox.stale{background:var(--warnbg);border-color:var(--warnborder);color:var(--warntext)}
+.zonebox.stale b{color:var(--warnb)}
 #zoneLegend{display:none;position:absolute;left:10px;right:10px;bottom:10px;z-index:5;
   background:var(--barbg);box-shadow:var(--barshadow);border:1px solid var(--line);
   border-radius:12px;padding:8px 10px;font-size:11px;color:var(--text);
@@ -317,7 +319,7 @@ function gmToGonmae(g){
     end: g.saleDate ? String(g.saleDate) + '0000' : '',
     bgn: '', status: g.maeAmt ? '매각(낙찰)' : '진행중',
     first: g.first || null,
-    zone: g.zone || null, zoneCat: g.zoneCat || null, zoneSub: g.zoneSub || null,
+    zone: g.zone || null, zoneCat: g.zoneCat || null, zoneSub: g.zoneSub || null, zoneDate: g.zoneDate || null,
     // 경매 원본 보존
     gCourt: g.court, gGyae: g.gyae, gCase: g.caseNo || g.srnSaNo,
     gSale: g.saleDate, gDecide: g.decideDate, gMae: g.maeAmt,
@@ -423,7 +425,7 @@ function render(){
       ${d.thumb ? `<img class="thumb" src="${d.thumb}" loading="lazy" onerror="this.style.visibility='hidden'">` : '<div class="thumb"></div>'}
       <div class="info">
         <div class="line1">${isNew(d) ? '<span class="tag new">NEW</span>' : ''}${srcTag(d)}<span class="tag ${d.type}">${d.use || TN[d.type]}</span>
-          ${isShare(d) ? `<span class="tag warn">⚠ ${d.share}</span>` : ''}${d.zone ? `<span class="tag zone">🏗 ${d.zoneSub || '정비구역'}</span>` : ''}<span>${d.gu}</span>
+          ${isShare(d) ? `<span class="tag warn">⚠ ${d.share}</span>` : ''}${d.zone ? `<span class="tag zone">🏗 ${d.zoneSub || '정비구역'}${d.zoneDate ? ' ' + d.zoneDate.slice(0,4) : ''}</span>` : ''}<span>${d.gu}</span>
           ${d.fail ? `<span>· 유찰 ${d.fail}회</span>` : ''}${d.hh ? `<span>· ${d.hh}세대</span>` : ''}</div>
         <div class="nm">${d.name || d.addr}</div>
         <div class="addr">${d.addr}</div>
@@ -489,11 +491,15 @@ function openSheet(d){
       ${d.gSpecial ? `<small>특별매각조건: ${d.gSpecial}</small>` : ''}
     </div>` : '';
 
+  const zYear = d.zoneDate ? parseInt(d.zoneDate.slice(0,4)) : null;
+  const zOld  = zYear && zYear < 2010;
   const zoneBox = d.zone ? `
-    <div class="zonebox">
+    <div class="zonebox${zOld ? ' stale' : ''}">
       <b>🏗 정비구역 내 물건</b><br>
       <b>${d.zone}</b>${d.zoneSub ? ` · ${d.zoneSub}` : ''}
-      <small>구역 경계는 서울시 의제처리구역(UPIS) 기준이며 참고용입니다. 조합원 지위 승계·분담금 등은 반드시 별도 확인하세요.</small>
+      ${d.zoneDate ? `<br>최초 결정고시 <b>${d.zoneDate}</b>` : ''}
+      ${zOld ? `<small>⚠ 고시가 오래된 구역입니다. 이미 준공·해제된 사업일 수 있으니(예: 준공 후에도 옛 구역 경계가 남아 있음) 반드시 현재 진행 여부를 확인하세요.</small>` : ''}
+      <small>구역 경계는 서울시 의제처리구역(UPIS) 기준이며 참고용입니다. 이 데이터에는 <b>진행단계 정보가 없습니다</b> — 조합설립·사업시행인가 여부, 조합원 지위 승계, 분담금은 반드시 별도 확인하세요.</small>
     </div>` : '';
 
   const aptRows = d.hh ? `
@@ -670,7 +676,7 @@ function drawZones(){
         zoneInfo = new kakao.maps.InfoWindow({
           position: e.latLng, removable: true,
           content: `<div style="padding:7px 10px;font-size:12px;line-height:1.5;max-width:210px">
-                      <b>${z.n}</b><br><span style="color:${color}">${z.s}</span></div>`
+                      <b>${z.n}</b><br><span style="color:${color}">${z.s}</span>${z.d ? `<br><span style="color:#888">최초고시 ${z.d}</span>` : ''}</div>`
         });
         zoneInfo.open(map);
       });
