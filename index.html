@@ -269,7 +269,8 @@ body.zonelayer #zoneLegend{display:flex}
 <script>
 window.ZDONE=(window.ZSTAGE&&window.ZSTAGE.done)||['준공인가','이전고시','조합해산','조합청산'];
 function zstage(n){return (window.ZSTAGE&&window.ZSTAGE.st&&window.ZSTAGE.st[n])||'';}
-function zdone(n){var v=zstage(n);return !!v&&window.ZDONE.indexOf(v)>=0;}
+function zcol(z){var t=(z.s||'')+(z.n||'');if(/모아|소규모|가로|자율/.test(t))return '#FFC24B';if(/역세권/.test(t))return '#4DA3FF';if(/공공재개발|공공재건축/.test(t))return '#3DD68C';if(/촉진|뉴타운/.test(t))return '#B98CFF';if(/재건축/.test(t))return '#FF6B6B';return '#FF8A3D';}
+function zdone(n){var v=zstage(n);if(v&&window.ZDONE.indexOf(v)>=0)return true;var F=(window.ZSTAGE&&window.ZSTAGE.fin)||[];return F.indexOf(n)>=0;}
 </script>
 <script>
 /* ── 공매(GONMAE) + 경매(GYEONGMAE) 통합 로드 ──────────────────
@@ -507,7 +508,7 @@ function openSheet(d){
       ${d.zoneDate ? `<br>최초 결정고시 <b>${d.zoneDate}</b>` : ''}
       ${zSt ? `<br>진행단계 <b>${zSt}</b>` : ''}
       
-      <small>구역 경계는 서울시 의제처리구역(UPIS) 기준이며 참고용입니다. 이 데이터에는 <b>진행단계는 정보몽땅 기준</b>(표시 없으면 미확인) — 조합설립·사업시행인가 여부, 조합원 지위 승계, 분담금은 반드시 별도 확인하세요.</small>
+      <small>구역 경계는 서울시 의제처리구역(UPIS) 기준이며 참고용입니다. </small>
     </div>` : '';
 
   const aptRows = d.hh ? `
@@ -685,7 +686,7 @@ function drawZones(){
         zoneInfo = new kakao.maps.InfoWindow({
           position: e.latLng, removable: true,
           content: `<div style="padding:7px 10px;font-size:12px;line-height:1.5;max-width:210px">
-                      <b>${z.n}</b><br><span style="color:${color}">${z.s}</span>${z.d ? `<br><span style="color:#888">최초고시 ${z.d}</span>` : ''}</div>`
+                      <b>${z.n}</b><br><span style="color:${color}">${z.s}</span>${z.d ? `<br><span style="color:#888">진행단계 ${(typeof z!=='undefined'&&z&&zstage(z.n))||'미확인'}<br>최초고시 ${z.d}</span>` : ''}</div>`
         });
         zoneInfo.open(map);
       });
