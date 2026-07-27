@@ -266,7 +266,7 @@ body.zonelayer #zoneLegend{display:flex}
 window.ZDONE=(window.ZSTAGE&&window.ZSTAGE.done)||['준공인가','이전고시','조합해산','조합청산'];
 function zstage(n){return (window.ZSTAGE&&window.ZSTAGE.st&&window.ZSTAGE.st[n])||'';}
 function zcol(z){var t=(z.s||'')+(z.n||'');if(/모아|소규모|가로|자율/.test(t))return '#FFC24B';if(/역세권/.test(t))return '#4DA3FF';if(/공공재개발|공공재건축/.test(t))return '#3DD68C';if(/촉진|뉴타운/.test(t))return '#B98CFF';if(/재건축/.test(t))return '#FF6B6B';return '#FF8A3D';}
-function zdone(n){var v=zstage(n);if(v&&window.ZDONE.indexOf(v)>=0)return true;var F=(window.ZSTAGE&&window.ZSTAGE.fin)||[];return F.indexOf(n)>=0;}
+function zdone(n){var v=zstage(n);if(v&&window.ZDONE.indexOf(v)>=0)return true;var F=(window.ZSTAGE&&window.ZSTAGE.fin)||[];if(F.indexOf(n)>=0)return true;var E=(window.ZSTAGE&&window.ZSTAGE.ex)||[];return E.indexOf(n)>=0;}
 </script>
 <script>
 /* ── 공매(GONMAE) + 경매(GYEONGMAE) 통합 로드 ──────────────────
@@ -428,7 +428,7 @@ function render(){
       ${d.thumb ? `<img class="thumb" src="${d.thumb}" loading="lazy" onerror="this.style.visibility='hidden'">` : '<div class="thumb"></div>'}
       <div class="info">
         <div class="line1">${isNew(d) ? '<span class="tag new">NEW</span>' : ''}${srcTag(d)}<span class="tag ${d.type}">${d.use || TN[d.type]}</span>
-          ${isShare(d) ? `<span class="tag warn">⚠ ${d.share}</span>` : ''}${d.zone ? `<span class="tag zone">🏗 ${d.zoneSub || '정비구역'}${d.zoneDate ? ' ' + d.zoneDate.slice(0,4) : ''}</span>` : ''}<span>${d.gu}</span>
+          ${isShare(d) ? `<span class="tag warn">⚠ ${d.share}</span>` : ''}${(d.zone && !zdone(d.zone) && d.zoneCat!=='기타') ? `<span class="tag zone">🏗 ${d.zoneSub || '정비구역'}${d.zoneDate ? ' ' + d.zoneDate.slice(0,4) : ''}</span>` : ''}<span>${d.gu}</span>
           ${d.fail ? `<span>· 유찰 ${d.fail}회</span>` : ''}${d.hh ? `<span>· ${d.hh}세대</span>` : ''}</div>
         <div class="nm">${d.name || d.addr}</div>
         <div class="addr">${d.addr}</div>
