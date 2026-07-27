@@ -389,7 +389,7 @@ function filtered(){
     if(!state.types[d.type]) return false;
     if(state.noShare && isShare(d)) return false;
     if(state.under && !isUnder(d)) return false;
-    if(state.zoneonly && !d.zone) return false;
+    if(state.zoneonly && (!d.zone || zdone(d.zone) || d.zoneCat==='기타')) return false;
     if(!rng((d.min||0)/1e8,  state.p1, state.p2)) return false;
     if(!rng((d.aprs||0)/1e8, state.v1, state.v2)) return false;
     const AU = state.areaUnit === 'py' ? PY : 1;

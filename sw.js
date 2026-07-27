@@ -1,4 +1,4 @@
-const C = 'gonmae-v9';
+const C = 'gonmae-v10';
 self.addEventListener('install', e => { self.skipWaiting(); });
 self.addEventListener('activate', e => e.waitUntil(clients.claim()));
 self.addEventListener('fetch', e => {
