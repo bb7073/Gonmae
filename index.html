@@ -496,7 +496,7 @@ function openSheet(d){
   const zYear = d.zoneDate ? parseInt(d.zoneDate.slice(0,4)) : null;
   const zOld = zYear && zYear < 2010;
   const zSt = zstage(d.zone), zFin = zdone(d.zone);
-  const zoneBox = (d.zone && !zFin) ? `
+  const zoneBox = (d.zone && !zFin && d.zoneCat !== '기타') ? `
     <div class="zonebox">
       <b>🏗 정비구역 내 물건</b><br>
       <b>${d.zone}</b>${d.zoneSub ? ` · ${d.zoneSub}` : ''}
