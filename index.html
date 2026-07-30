@@ -878,24 +878,31 @@ if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch
 (function boot(){
  if(typeof map==="undefined"||!map||!window.SINTONG||!window.kakao)
    return setTimeout(boot,300);
- var C="#FF2D95",K={},U=[];
- window.SINTONG.forEach(function(z){
-  var k=z.n+"|"+z.p.length+"|"+z.p[0];
-  if(!K[k]){K[k]=1;U.push(z);}
- });
- var ps=[],on=true,chip=null;
+ var C="#FF2D95",ps=[],on=true,chip=null;
  function draw(){
   ps.forEach(function(p){p.setMap(null);});ps=[];
   if(!on)return;
-  U.forEach(function(z){
-   var pg=new kakao.maps.Polygon({
-    path:z.p.map(function(c){return new kakao.maps.LatLng(c[1],c[0]);}),
-    strokeWeight:4,strokeColor:C,strokeOpacity:1,strokeStyle:"solid",
-    fillColor:C,fillOpacity:0.28,zIndex:9000});
-   pg.setMap(map);
-   kakao.maps.event.addListener(pg,"click",function(){
-    alert("[신속통합기획] "+z.n+"\n"+(z.g||"")+"\nSHP: "+z.s);});
-   ps.push(pg);
+  window.SINTONG.forEach(function(z){
+   z.p.forEach(function(r){
+    var pg=new kakao.maps.Polygon({
+     path:r.map(function(c){return new kakao.maps.LatLng(c[1],c[0]);}),
+     strokeWeight:2,strokeColor:C,strokeOpacity:0.75,strokeStyle:"solid",
+     fillColor:C,fillOpacity:0.10,zIndex:9000});
+    pg.setMap(map);
+    kakao.maps.event.addListener(pg,"click",function(){
+     alert("[신통] "+z.n+"\n"+(z.g||""));});
+    ps.push(pg);
+   });
+  });
+  (window.SINTONG_PT||[]).forEach(function(t){
+   var el=document.createElement("div");
+   el.style.cssText="width:11px;height:11px;border-radius:50%;background:"+C+
+    ";opacity:.75;border:1.5px solid #fff;box-shadow:0 0 2px rgba(0,0,0,.4);cursor:pointer";
+   el.title=t.n;
+   el.onclick=function(){alert("[신통] "+t.n+"\n"+(t.g||"")+"\n(정비구역 미지정 · "+t.m+"좌표)");};
+   var ov=new kakao.maps.CustomOverlay({
+    position:new kakao.maps.LatLng(t.xy[1],t.xy[0]),content:el,zIndex:9001});
+   ov.setMap(map);ps.push(ov);
   });
  }
  function mkchip(){
@@ -916,7 +923,7 @@ if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch
  window.sintongToggle=function(){on=!on;draw();
   if(chip)chip.style.opacity=on?"1":"0.35";return on;};
  draw();mkchip();
- console.log("SINTONG",U.length,"/",window.SINTONG.length);
+ console.log("SINTONG",window.SINTONG.length,"PT",(window.SINTONG_PT||[]).length);
 })();
 </script>
 </body>
