@@ -871,5 +871,53 @@ syncUI();
 render();
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>
+
+<!-- SINTONG_LAYER -->
+<script src="sintong_poly.js"></script>
+<script>
+(function boot(){
+ if(typeof map==="undefined"||!map||!window.SINTONG||!window.kakao)
+   return setTimeout(boot,300);
+ var C="#FF2D95",K={},U=[];
+ window.SINTONG.forEach(function(z){
+  var k=z.n+"|"+z.p.length+"|"+z.p[0];
+  if(!K[k]){K[k]=1;U.push(z);}
+ });
+ var ps=[],on=true,chip=null;
+ function draw(){
+  ps.forEach(function(p){p.setMap(null);});ps=[];
+  if(!on)return;
+  U.forEach(function(z){
+   var pg=new kakao.maps.Polygon({
+    path:z.p.map(function(c){return new kakao.maps.LatLng(c[1],c[0]);}),
+    strokeWeight:4,strokeColor:C,strokeOpacity:1,strokeStyle:"solid",
+    fillColor:C,fillOpacity:0.28,zIndex:9000});
+   pg.setMap(map);
+   kakao.maps.event.addListener(pg,"click",function(){
+    alert("[신속통합기획] "+z.n+"\n"+(z.g||"")+"\nSHP: "+z.s);});
+   ps.push(pg);
+  });
+ }
+ function mkchip(){
+  var a=document.querySelectorAll("span,div,li,b,em"),t=null;
+  for(var i=0;i<a.length;i++){var e=a[i];
+   if(e.children.length<=1&&e.textContent.length<14&&
+      e.textContent.indexOf("촉진")>=0)t=e;}
+  if(!t)return;
+  var c=t.cloneNode(true);
+  c.innerHTML=c.innerHTML.replace(/촉진\(뉴타운\)/,"신통").replace(/촉진/,"신통");
+  var s=c.querySelectorAll("*");
+  for(var j=0;j<s.length;j++){if(s[j].style){
+    s[j].style.background=C;s[j].style.backgroundColor=C;}}
+  c.style.cursor="pointer";c.id="sintongChip";
+  c.onclick=function(){on=!on;c.style.opacity=on?"1":"0.35";draw();};
+  t.parentNode.appendChild(c);chip=c;
+ }
+ window.sintongToggle=function(){on=!on;draw();
+  if(chip)chip.style.opacity=on?"1":"0.35";return on;};
+ draw();mkchip();
+ console.log("SINTONG",U.length,"/",window.SINTONG.length);
+})();
+</script>
 </body>
 </html>
