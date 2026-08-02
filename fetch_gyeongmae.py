@@ -522,6 +522,9 @@ def notify_new_gm(items):
         if d.get("saleDate"):
             sd = str(d["saleDate"])
             L.append(f"  매각기일 {sd[:4]}.{sd[4:6]}.{sd[6:8]}")
+        import urllib.parse as U
+        L.append("  네이버지도 https://map.naver.com/p/search/"+U.quote(d.get("addr") or ""))
+        L.append("  법원경매 https://www.courtauction.go.kr/pgj/index.on?w2xPath=/pgj/ui/pgj100/PGJ151F00.xml")
         blocks.append("\n".join(L))
     msg, sent = header, 0
     for b in blocks:
