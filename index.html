@@ -348,7 +348,7 @@ const D = [
 /* 오늘의 매물 / 관심(즐겨찾기) */
 const GM_AT = (typeof window.GYEONGMAE === 'object' && window.GYEONGMAE && window.GYEONGMAE.updated) ? window.GYEONGMAE.updated : (window.GYEONGMAE_AT || '');
 const TODAY = ((window.GONMAE_AT || GM_AT || '') + '').slice(0,10);
-const GM_D = GM_AT.slice(0,10); const isNew = d => d.first && (d.first === TODAY || d.first === GM_D);
+const LD = new Date(Date.now()+324e5).toISOString().slice(0,10); const isNew = d => d.first === LD;
 const FAVKEY = 'gonmae_fav';
 let favs = new Set((()=>{ try{ return JSON.parse(localStorage.getItem(FAVKEY)||'[]'); }catch(_){ return []; } })());
 const isFav = d => favs.has(d.id);
