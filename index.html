@@ -265,7 +265,7 @@ body.zonelayer #zoneLegend{display:flex}
 <script>
 window.ZDONE=(window.ZSTAGE&&window.ZSTAGE.done)||['준공인가','이전고시','조합해산','조합청산'];
 function zstage(n){return (window.ZSTAGE&&window.ZSTAGE.st&&window.ZSTAGE.st[n])||'';}
-function zcol(z){var t=(z.s||'')+(z.n||'');if(/모아|소규모|가로|자율/.test(t))return '#FFC24B';if(/역세권/.test(t))return '#4DA3FF';if(/공공재개발|공공재건축/.test(t))return '#3DD68C';if(/촉진|뉴타운/.test(t))return '#B98CFF';if(/재건축/.test(t))return '#FF6B6B';return '#FF8A3D';}
+function zcol(z){var t=(z.s||'')+(z.n||'');if(/모아타운|모아주택/.test(t)||(/소규모주택정비/.test(t)&&/관리지역/.test(t)))return '#00C9A7';if(/역세권/.test(t))return '#2563EB';if(/공공재개발|공공재건축/.test(t))return '#059669';if(/촉진|뉴타운/.test(t))return '#7C3AED';if(/모아|소규모|가로|자율/.test(t))return '#EAB308';if(/재건축/.test(t))return '#DC2626';return '#F97316';}
 function zdone(n){var v=zstage(n);if(v&&window.ZDONE.indexOf(v)>=0)return true;var F=(window.ZSTAGE&&window.ZSTAGE.fin)||[];if(F.indexOf(n)>=0)return true;var E=(window.ZSTAGE&&window.ZSTAGE.ex)||[];return E.indexOf(n)>=0;}
 </script>
 <script>
@@ -667,7 +667,7 @@ function drawZones(){
     const [x1,y1,x2,y2] = z._b;
     if(x2 < bx1 || x1 > bx2 || y2 < by1 || y1 > by2) continue;   // 화면 밖
     if(++n > 160) break;                                          // 과부하 방지
-    const color = ZCOLOR[z.c] || '#8B98A5';
+    const color = zcol(z);
     const polys = (z.t === 1) ? z.g : [z.g];
     polys.forEach(poly => {
       const paths = poly.map(ring => ring.map(c => new kakao.maps.LatLng(c[1], c[0])));
