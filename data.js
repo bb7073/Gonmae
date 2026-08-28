@@ -1,2 +1,2 @@
 window.GONMAE = [];
-window.GONMAE_AT = "2026-08-27 13:37";
+window.GONMAE_AT = "2026-08-28 16:00";
