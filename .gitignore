@@ -1,0 +1,5 @@
+.kakao_key
+__pycache__/
+*.bak
+*.log
+deals_store.json
