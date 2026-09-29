@@ -97,7 +97,7 @@ def save():
 # ── 한 (lawd,kind,ym) 청크 수집(원격) ──
 def _fetch_chunk(lawd, kind, ym):
     q = urllib.parse.urlencode({"serviceKey": _KEY, "LAWD_CD": lawd, "DEAL_YMD": ym,
-                                "numOfRows": 1000, "pageNo": 1}, safe="=")
+                                "numOfRows": 1000, "pageNo": 1})
     try:
         its = _xml_items(_http_get(f"{RT[kind]}?{q}"))
     except Exception:

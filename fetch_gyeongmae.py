@@ -29,6 +29,7 @@ sys.stderr.reconfigure(line_buffering=True)
 
 import requests
 
+import analyze as AZ
 try:
     import deals_cache as DC
 except Exception:
@@ -315,6 +316,7 @@ def process_one(s, r):
 
     ladder, sold_amt, special = [], 0, ""
     photos = []
+    dm = {}
     try:
         dm = fetch_detail(s, court, sa_no, gds_seq)
         ladder, sold_amt, special = parse_ladder(dm)
@@ -328,8 +330,9 @@ def process_one(s, r):
     if isinstance(geo, (list, tuple)):
         geo = {"lat": float(geo[0]), "lng": float(geo[1]), "lon": float(geo[1])} if len(geo) >= 2 else None
     elif isinstance(geo, dict):
-        if "lng" not in geo and "lon" in geo: geo["lng"] = geo["lon"]
-        if "lon" not in geo and "lng" in geo: geo["lon"] = geo["lng"]
+        if geo:
+            if "lng" not in geo and "lon" in geo: geo["lng"] = geo["lon"]
+            if "lon" not in geo and "lng" in geo: geo["lon"] = geo["lng"]
         if "lat" not in geo: geo = None
 
     gaman = int(r.get("gamevalAmt") or 0)
@@ -380,13 +383,16 @@ def process_one(s, r):
 
     _zone = ZONE.find(geo.get("lat"), geo.get("lng")) if (ZONE and geo) else None
 
+    _bd, _kl = AZ.badges(special, jibun_flag)
+    if not apt_nm:
+        apt_nm = AZ.apt_from_aee(dm) or ""
     return {
         "src": "경매",
         "court": COURTS.get(court, court),
         "caseNo": r.get("srnSaNo"),
         "saNo": sa_no, "gdsSeq": gds_seq, "boCd": court,
         "kind": kind, "usg": r.get("dspslUsgNm",""),
-        "name": ((apt_nm + " " + (r.get("buldList") or r.get("printSt") or "")).strip() if apt_nm else (r.get("buldList") or r.get("printSt") or "").strip()),
+        "name": ((apt_nm + " " + (r.get("buldList") or "")).strip() + " (" + (umd + " " + jibun).strip() + ")") if apt_nm else (r.get("buldList") or r.get("printSt") or "").strip(),
         "addr": addr, "road": road,
         "gyae": r.get("jpDeptNm",""),
         "lat": geo.get("lat") if geo else None,
@@ -402,7 +408,12 @@ def process_one(s, r):
         "area": area,
         "jibun": jibun_flag,
         "bigo": (r.get("mulBigo") or "").strip(),
-        "special": special[:200],
+        "special": special[:600],
+        "badge": _bd,
+        "kill": _kl,
+        "baseRight": AZ.base_right(dm),
+        "landShare": AZ.land_share(dm),
+        "isApt": AZ.is_apt(dm),
         "ladder": ladder,
         "inq": int(r.get("inqCnt") or 0),
         "deal": deal,            # 최근 실거래(전체 1채)
