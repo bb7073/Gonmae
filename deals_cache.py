@@ -20,7 +20,7 @@ deals_cache.py  —  국토부 실거래 공유 캐시 (공매 fetch_gonmae + �
   names = DC.deal_names(lawd, umd, jibun)
   hist  = DC.deal_history(lawd, umd, jibun, bldg, area)
 """
-import os, json, time, urllib.parse, urllib.request
+import os, time, json, time, urllib.parse, urllib.request
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 
@@ -96,6 +96,7 @@ def save():
 
 # ── 한 (lawd,kind,ym) 청크 수집(원격) ──
 def _fetch_chunk(lawd, kind, ym):
+    time.sleep(0.5)
     q = urllib.parse.urlencode({"serviceKey": _KEY, "LAWD_CD": lawd, "DEAL_YMD": ym,
                                 "numOfRows": 1000, "pageNo": 1})
     try:
@@ -124,7 +125,7 @@ def _chunk(lawd, kind, ym):
     if ym != cur and isinstance(_store, dict) and key in _store:
         return _store[key]                 # 과거달 캐시 히트
     recs = _fetch_chunk(lawd, kind, ym)
-    if ym != cur:                          # 과거달만 영구 저장(이번달은 계속 바뀌니 저장X)
+    if ym != cur and recs:                          # 과거달만 영구 저장(이번달은 계속 바뀌니 저장X)
         _store[key] = recs
         _dirty = True
     return recs
@@ -139,7 +140,7 @@ def load(lawd):
     def _one(j):
         k, ym = j
         return _chunk(lawd, k, ym)
-    with ThreadPoolExecutor(max_workers=6) as ex:
+    with ThreadPoolExecutor(max_workers=2) as ex:
         for recs in ex.map(_one, jobs):
             for r in recs:
                 if r["umd"] and r["jibun"]:

@@ -392,7 +392,7 @@ def process_one(s, r):
         "caseNo": r.get("srnSaNo"),
         "saNo": sa_no, "gdsSeq": gds_seq, "boCd": court,
         "kind": kind, "usg": r.get("dspslUsgNm",""),
-        "name": ((apt_nm + " " + (r.get("buldList") or "")).strip() + " (" + (umd + " " + jibun).strip() + ")") if apt_nm else (r.get("buldList") or r.get("printSt") or "").strip(),
+        "name": ((apt_nm + " " + (r.get("buldList") or "")).strip() + " (" + (umd + " " + jibun).strip() + ")") if apt_nm else ((r.get("buldList") or r.get("printSt") or "").strip() + " (" + (umd + " " + jibun).strip() + ")").strip(),
         "addr": addr, "road": road,
         "gyae": r.get("jpDeptNm",""),
         "lat": geo.get("lat") if geo else None,
@@ -580,6 +580,9 @@ if __name__ == "__main__":
         print(f"\n✖ 수집 0건 — 저장/알림을 건너뜁니다. 기존 {len(prev)}건 데이터 보존됨.")
         print("  (법원경매 사이트 접속 차단 또는 네트워크 장애일 가능성이 큽니다.)")
         sys.exit(1)
+    if DC:
+        try: DC.save()
+        except Exception as e: print('[deals_cache] save 실패:', e)
     new_items = mark_first(items)   # ★ first 기록 (write_js 전에 실행해야 직전 파일을 읽을 수 있음)
     write_js(items)
     notify_new_gm(new_items)
